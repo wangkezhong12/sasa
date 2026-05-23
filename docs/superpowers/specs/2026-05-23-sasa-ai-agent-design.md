@@ -200,6 +200,7 @@ CREATE TABLE saas_connectors (
   config_json JSONB DEFAULT '{}',         -- 连接器专属配置
   is_builtin BOOLEAN NOT NULL DEFAULT FALSE,
   api_base_url TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'active',  -- 预置为 'active'，自定义经历 'draft' → 'active'
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -423,12 +424,9 @@ packages/connector-sdk/connectors/
 6. 管理员在管理界面中为每个 Tool 配置 `required_permission` 和 `risk_level`（系统根据 HTTP 方法给出默认建议：GET→read、POST/PUT→write、DELETE→delete）
 7. 管理员确认发布，连接器状态变为 `active`，工作空间内用户可绑定使用
 
-`saas_connectors` 表增加 `status` 字段：
+`saas_connectors` 表增加 `status` 字段（已合并至上方 CREATE TABLE 中）。
 
-```sql
-ALTER TABLE saas_connectors ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active';
--- 预置连接器始终为 'active'，自定义连接器经历 'draft' → 'active' 流程
-```
+注：确认超时的 pending confirmations 使用内存 Map 存储，服务器重启时会丢失。这是 v1 的已知简化，任何进行中的工具调用确认在重启后将视为超时取消。
 
 ### 权限映射
 
