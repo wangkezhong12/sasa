@@ -133,7 +133,9 @@ sasa/
 - 对外接口：`AgentService`, `ToolRegistry`
 
 #### Permission Module — 安全防护
-- 加载用户权限（绑定 SaaS 时同步，本地缓存）
+- 加载用户权限（绑定 SaaS 时通过 `connector.fetchPermissions()` 同步，本地 Redis 缓存）
+- 权限同步触发时机：首次绑定、手动刷新、每次对话开始时检查缓存是否存在
+- 缓存策略：Redis 存储，TTL 30 分钟，过期后下次对话自动重新同步
 - 调用前过滤：根据用户权限从 ToolRegistry 中移除无权限的工具
 - 操作风险分级（read/write/delete），高风险操作在确认卡片上醒目标红
 - 审计日志：记录每次工具调用（谁、何时、调了什么、结果），只能追加不可修改
@@ -192,7 +194,7 @@ CREATE TABLE saas_connectors (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   workspace_id UUID REFERENCES workspaces(id), -- NULL 表示预置连接器
   name VARCHAR(100) NOT NULL,
-  type VARCHAR(10) NOT NULL DEFAULT 'rest', -- 'rest' | 'mcp' | 'cli'
+  type VARCHAR(10) NOT NULL DEFAULT 'rest', -- v1 仅 'rest'，预留 'mcp'/'cli' 供后续迭代
   version VARCHAR(20),
   schema_json JSONB NOT NULL,             -- OpenAPI 文档解析结果
   config_json JSONB DEFAULT '{}',         -- 连接器专属配置
@@ -214,7 +216,7 @@ CREATE TABLE saas_bindings (
   status VARCHAR(20) NOT NULL DEFAULT 'active',
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   expires_at TIMESTAMPTZ,
-  UNIQUE(user_id, connector_id)
+  UNIQUE(user_id, connector_id)  -- 一个用户对同一个连接器只绑定一个 SaaS 账号；如需多账号（如不同 ERP 租户），通过创建不同工作空间的连接器实例实现
 );
 
 -- 对话
@@ -320,13 +322,14 @@ CREATE TABLE system_configs (
 ### 上下文窗口管理
 
 - 始终保留：System Prompt、Tool Definitions
-- 保留最近 10 轮完整对话
-- 超出窗口时按轮次丢弃最早的
+- Tool Definitions 总量较大时（超过 50 个），仅发送与当前对话上下文相关的子集（根据用户最近操作推断）
+- 保留最近 10 轮完整对话（一轮 = 用户消息 + Agent 回复 + 可能的 Tool Call/Result）
+- 总 token 预算：System Prompt + Tool Definitions + 历史消息总和不超过模型上下文窗口的 80%，预留 20% 给输出。超出时从最早的历史消息开始丢弃
 - 后续迭代可引入 LLM 摘要压缩
 
 ### 多步工具调用
 
-单轮最多 5 步工具调用链。Agent Engine 循环执行 Tool Call → 结果回传 LLM → LLM 决定下一步，直到 LLM 不再发起 Tool Call。
+单轮最多 5 步工具调用链。Agent Engine 循环执行 Tool Call → 结果回传 LLM → LLM 决定下一步，直到 LLM 不再发起 Tool Call。达到 5 步上限时，Agent Engine 中止后续 Tool Call，将已收集的结果回传 LLM 并附加提示"已达到单轮最大操作步数，请基于已有结果总结回复用户"。
 
 ## Tool Call 确认机制
 
@@ -347,6 +350,7 @@ LLM 返回 Tool Call → Agent Engine 暂停 → SSE 推送确认请求到前端
 - 默认 5 分钟，可配置（system_configs 表中 `confirmation_timeout_seconds`）
 - 配置层级：平台默认 → 工作空间 → 个人
 - 超时未响应视为取消
+- 超时实现：Agent Engine 在内存中维护一个 `Map<confirmationId, { timer, resolve }>` 的 pending confirmations 映射。收到用户确认时清除定时器并 resolve；定时器到期时自动 resolve 为 cancel。服务器重启时，pending confirmations 丢失，前端重连后如发现未确认的操作，显示"操作已因超时取消"提示
 
 ### SSE 协议
 
@@ -368,10 +372,11 @@ LLM 返回 Tool Call → Agent Engine 暂停 → SSE 推送确认请求到前端
 interface SaaSConnector {
   name: string;
   version: string;
-  protocol: 'rest' | 'mcp' | 'cli';
+  protocol: 'rest' | 'mcp' | 'cli';       // v1 仅 'rest'
   supportedAuthTypes: ('oauth2' | 'api_key')[];
   validateCredentials(credentials: EncryptedCred): Promise<boolean>;
   getToolDefinitions(): ToolDefinition[];
+  fetchPermissions(credentials: EncryptedCred): Promise<string[]>;
   executeToolCall(
     toolName: string,
     parameters: Record<string, unknown>,
@@ -408,6 +413,23 @@ packages/connector-sdk/connectors/
 
 **自定义连接器**：用户上传 OpenAPI JSON/YAML → 自动解析生成 Tool Definitions → 管理员配置 requiredPermission 和 riskLevel → 保存到数据库
 
+### 自定义连接器生成流程
+
+1. 用户上传 OpenAPI JSON/YAML 文档
+2. Schema Module 校验文档格式（必须为有效的 OpenAPI 3.x），拒绝格式错误的文档并提示具体错误
+3. 解析文档，提取每个 API 端点的路径、方法、参数、描述
+4. 自动生成 `tool_definitions` 记录（name、description、parameters_json、api_mapping_json）
+5. 生成的连接器进入 `draft` 状态，此时用户不可使用
+6. 管理员在管理界面中为每个 Tool 配置 `required_permission` 和 `risk_level`（系统根据 HTTP 方法给出默认建议：GET→read、POST/PUT→write、DELETE→delete）
+7. 管理员确认发布，连接器状态变为 `active`，工作空间内用户可绑定使用
+
+`saas_connectors` 表增加 `status` 字段：
+
+```sql
+ALTER TABLE saas_connectors ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'active';
+-- 预置连接器始终为 'active'，自定义连接器经历 'draft' → 'active' 流程
+```
+
 ### 权限映射
 
 连接器定义 Tools → 每个 Tool 标注 required_permission → 用户绑定 SaaS 后同步 permissions_json → 对话前对比过滤。
@@ -417,9 +439,10 @@ packages/connector-sdk/connectors/
 ### 多模型支持
 
 - 用户/工作空间自备 API Key，平台不提供默认模型
-- 首次使用强制引导配置 LLM（选择供应商、填入 API Key、选模型）
+- 首次使用强制引导配置 LLM（选择供应商、填入 API Key、选模型），未配置时聊天界面显示配置引导页，禁用消息输入
 - 支持供应商：OpenAI、Anthropic、DeepSeek、自定义端点
-- 配置查找：用户个人配置 → 工作空间配置 → 都没有则拦截引导
+- 配置查找：用户个人配置 → 工作空间配置 → 都没有则拦截并显示引导页
+- 运行时 API Key 失效（被撤销/余额不足）：LLM 调用返回认证错误时，Agent Engine 中止当前对话，前端弹出提示"模型 API Key 已失效，请检查配置"并提供跳转设置页的按钮，不自动重试
 
 ### 模型要求
 
@@ -435,7 +458,7 @@ packages/connector-sdk/connectors/
 
 - 侧边栏：对话列表、SaaS 管理、工作空间（如已加入）、个人设置
 - 主内容区：根据侧边栏选中项切换
-- 聊天界面顶部可切换当前操作的 SaaS
+- 聊天界面顶部可切换当前操作的 SaaS（切换后，后续消息在当前对话中关联新的 connector_id，历史消息保持原关联不变）
 
 ### 聊天界面
 
@@ -460,12 +483,17 @@ packages/connector-sdk/connectors/
 | LLM API 调用失败 | 提示模型服务异常 → 建议检查 API Key |
 | LLM 幻觉 | Connector 层参数校验拦截 → 返回错误让 LLM 自纠 |
 | 用户确认超时 | 视为取消 → LLM 生成超时提示 |
+| Redis 不可用 | 权限缓存降级为数据库直查，速率限制临时关闭并记录告警日志，会话状态使用内存临时替代 |
+| 数据库不可用 | 返回 503 服务暂不可用，不重试（避免雪崩），前端显示维护提示 |
+| SSE 连接中断 | 前端自动重连（指数退避），重连后通过最后一条消息 ID 恢复流式传输；如重连时 Tool Call 确认已超时，显示超时提示 |
 
 ## 安全措施
 
 - **凭证安全**：AES-256-GCM 加密存储，密钥通过环境变量注入不落库
 - **传输安全**：全站 HTTPS，SSE 连接 JWT 认证
 - **操作安全**：所有 Tool Call 前端确认，审计日志只追加不可修改
+- **审计日志不可变性**：应用层禁止 UPDATE/DELETE 操作（Repository 层仅暴露 `create` 和 `find` 方法），数据库层通过 PostgreSQL Row Level Security 策略限制审计表只能 INSERT 和 SELECT
+- **审计日志保留策略**：默认保留 90 天，通过定时任务清理超期记录（保留策略可通过 system_configs 配置）
 - **数据隔离**：工作空间间数据严格隔离（所有查询带 workspace_id 过滤）
 - **速率限制**：用户级 20次/分钟，工作空间级 100次/分钟，SaaS 连接器级可配置，Redis 滑动窗口实现
 
