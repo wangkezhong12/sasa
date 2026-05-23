@@ -124,5 +124,80 @@ describe('PermissionService', () => {
       const result = await service.syncPermissions('user-1', 'conn-1');
       expect(result).toEqual([]);
     });
+
+    it('should fetch permissions from connector, update DB and cache', async () => {
+      const fetchedPerms = ['leave:submit', 'leave:approve'];
+
+      mockDb.select = jest.fn().mockReturnValue({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([{
+            id: 'binding-id',
+            encryptedCred: Buffer.from('encrypted'),
+          }]),
+        }),
+      });
+
+      const mockConnector = {
+        fetchPermissions: jest.fn().mockResolvedValue(fetchedPerms),
+      };
+      mockRegistry.get = jest.fn().mockReturnValue(mockConnector);
+      mockCrypto.decrypt = jest.fn().mockReturnValue('decrypted-cred');
+
+      const updateChain = {
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue(undefined),
+        }),
+      };
+      mockDb.update = jest.fn().mockReturnValue(updateChain);
+
+      const result = await service.syncPermissions('user-1', 'conn-1');
+
+      expect(result).toEqual(fetchedPerms);
+      expect(mockRegistry.get).toHaveBeenCalledWith('conn-1');
+      expect(mockCrypto.decrypt).toHaveBeenCalledWith(Buffer.from('encrypted'));
+      expect(mockConnector.fetchPermissions).toHaveBeenCalledWith('decrypted-cred');
+      expect(mockDb.update).toHaveBeenCalledWith(expect.anything());
+      expect(updateChain.set).toHaveBeenCalledWith({ permissionsJson: fetchedPerms });
+      expect(mockRedis.set).toHaveBeenCalledWith(
+        'permissions:user-1:conn-1',
+        JSON.stringify(fetchedPerms),
+        'EX',
+        expect.any(Number),
+      );
+    });
+
+    it('should throw InternalServerErrorException when connector fails', async () => {
+      mockDb.select = jest.fn().mockReturnValue({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([{
+            id: 'binding-id',
+            encryptedCred: Buffer.from('encrypted'),
+          }]),
+        }),
+      });
+      mockRegistry.get = jest.fn().mockReturnValue({
+        fetchPermissions: jest.fn().mockRejectedValue(new Error('Network error')),
+      });
+      mockCrypto.decrypt = jest.fn().mockReturnValue('cred');
+
+      await expect(service.syncPermissions('user-1', 'conn-1'))
+        .rejects.toThrow('Failed to sync permissions: Network error');
+    });
+
+    it('should throw InternalServerErrorException when decrypt fails', async () => {
+      mockDb.select = jest.fn().mockReturnValue({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([{
+            id: 'binding-id',
+            encryptedCred: Buffer.from('bad-data'),
+          }]),
+        }),
+      });
+      mockRegistry.get = jest.fn().mockReturnValue({});
+      mockCrypto.decrypt = jest.fn().mockImplementation(() => { throw new Error('Decryption failed'); });
+
+      await expect(service.syncPermissions('user-1', 'conn-1'))
+        .rejects.toThrow('Failed to sync permissions: Decryption failed');
+    });
   });
 });

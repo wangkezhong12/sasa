@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, InternalServerErrorException } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import Redis from 'ioredis';
 import { DB } from '../../common/database/database.module';
@@ -26,7 +26,10 @@ export class PermissionService {
 
     try {
       const cached = await this.redis.get(cacheKey);
-      if (cached) return JSON.parse(cached);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        return parsed;
+      }
     } catch {
       // Redis unavailable — fall through to DB
     }
@@ -57,9 +60,14 @@ export class PermissionService {
 
     if (!binding) return [];
 
-    const connector = this.connectorRegistry.get(connectorId);
-    const cred = this.crypto.decrypt(binding.encryptedCred);
-    const permissions = await connector.fetchPermissions(cred);
+    let permissions: string[];
+    try {
+      const connector = this.connectorRegistry.get(connectorId);
+      const cred = this.crypto.decrypt(binding.encryptedCred);
+      permissions = await connector.fetchPermissions(cred);
+    } catch (err) {
+      throw new InternalServerErrorException(`Failed to sync permissions: ${err instanceof Error ? err.message : String(err)}`);
+    }
 
     await this.db.update(saasBindings)
       .set({ permissionsJson: permissions })
