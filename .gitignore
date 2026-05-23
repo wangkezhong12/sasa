@@ -25,5 +25,6 @@ Thumbs.db
 CLAUDE.md
 .claude/
 
-# Claude Code docs (internal planning specs)
+# Internal docs (not for public repo)
 docs/superpowers/
+docs/deploy.md
