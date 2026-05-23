@@ -848,3 +848,102 @@ git add -A && git commit -m "feat: init @sasa/connector-sdk with BaseRestConnect
 
 ---
 
+
+---
+
+### Chunk 1 验证流程
+
+#### 步骤 A：补充单测（覆盖率 ≥ 90%）
+
+- [ ] **为 shared 包添加类型校验单测**
+
+```typescript
+// packages/shared/src/types/connector.spec.ts
+import { describe, it, expect } from 'vitest';
+import type { SaaSConnector, ConnectorToolDefinition, ToolResult } from './connector';
+
+describe('connector types', () => {
+  it('SaaSConnector interface should define required methods', () => {
+    const connector: SaaSConnector = {
+      name: 'test', version: '1.0', protocol: 'rest',
+      supportedAuthTypes: ['api_key'],
+      validateCredentials: async () => true,
+      getToolDefinitions: () => [],
+      fetchPermissions: async () => [],
+      executeToolCall: async () => ({ success: true }),
+    };
+    expect(connector.name).toBe('test');
+    expect(connector.protocol).toBe('rest');
+  });
+});
+```
+
+- [ ] **为 connector-sdk 添加 BaseRestConnector 单测**
+
+```typescript
+// packages/connector-sdk/src/base-connector.spec.ts
+import { describe, it, expect } from 'vitest';
+// 测试路径解析、header 构建、body 映射等私有方法通过子类间接测试
+```
+
+- [ ] **运行所有单测并检查覆盖率**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+cd packages/shared && pnpm test -- --coverage
+cd ../connector-sdk && pnpm test -- --coverage
+```
+
+Expected: 覆盖率 ≥ 90%
+
+#### 步骤 B：集成测试
+
+- [ ] **验证 monorepo 构建和包间引用**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+pnpm build
+# 验证 server 能引用 shared 类型
+cd apps/server && node -e "require('@sasa/shared').LLM_PROVIDERS" || echo "FAIL"
+# 验证 server 能启动
+pnpm dev &
+sleep 3 && curl -s http://localhost:4000 && kill %1
+```
+
+Expected: 构建成功，包引用正确，服务器启动
+
+#### 步骤 C：端到端测试（Playwright）
+
+> Chunk 1 为脚手架阶段，无用户界面可测试。跳过 Playwright。
+
+- [ ] **标记为 N/A — Chunk 1 无用户界面**
+
+#### 步骤 D：Code Review
+
+- [ ] **审查以下风险点**
+
+```
+检查清单:
+□ package.json 中所有依赖版本是否固定（^minor 可接受）
+□ tsconfig.json 的 module/moduleResolution 是否跨包兼容（shared 输出 CommonJS）
+□ .env.example 是否包含所有必需的环境变量且不含真实密钥
+□ .gitignore 是否覆盖 node_modules/dist/.env/.turbo/.next
+□ turbo.json 的 task 依赖配置是否正确（shared 先于 server 构建）
+□ workspace 引用是否使用 workspace:* 协议
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-1): monorepo scaffolding with shared types, connector-sdk, NestJS, Next.js
+
+- Turborepo + pnpm workspace monorepo
+- @sasa/shared: types (connector, message, user, llm) + constants
+- @sasa/connector-sdk: BaseRestConnector with REST execution
+- @sasa/server: NestJS 11 scaffold
+- @sasa/web: Next.js 15 + shadcn/ui + Tailwind
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```

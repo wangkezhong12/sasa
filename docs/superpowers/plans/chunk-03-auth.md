@@ -480,3 +480,215 @@ git add -A && git commit -m "feat: add SaaS account binding API (API Key flow)"
 
 ---
 
+
+---
+
+### Chunk 3 验证流程
+
+#### 步骤 A：补充单测（覆盖率 ≥ 90%）
+
+- [ ] **为 AuthService 补充边界和错误场景测试**
+
+```typescript
+// apps/server/src/modules/auth/auth.service.spec.ts 追加
+describe('AuthService.register', () => {
+  it('should reject duplicate email', async () => {
+    mockDb.select = jest.fn().mockReturnValue({
+      from: jest.fn().mockReturnValue({
+        where: jest.fn().mockResolvedValue([{ id: 'existing' }]),
+      }),
+    });
+    await expect(service.register('test@test.com', '123456', 'Test'))
+      .rejects.toThrow(ConflictException);
+  });
+
+  it('should hash password with SHA-256', async () => {
+    await service.register('test@test.com', 'password123', 'Test');
+    const insertCall = mockDb.insert.mock.calls[0][1] || mockDb.insert().values.mock.calls[0][0];
+    // 验证 passwordHash 不是明文
+  });
+});
+
+describe('AuthService.login', () => {
+  it('should reject non-existent user', async () => {
+    mockDb.select = jest.fn().mockReturnValue({
+      from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([]) }),
+    });
+    await expect(service.login('no@test.com', 'pass')).rejects.toThrow(UnauthorizedException);
+  });
+
+  it('should reject wrong password', async () => {
+    mockDb.select = jest.fn().mockReturnValue({
+      from: jest.fn().mockReturnValue({
+        where: jest.fn().mockResolvedValue([{
+          id: 'u1', passwordHash: crypto.createHash('sha256').update('correct').digest('hex'),
+        }]),
+      }),
+    });
+    await expect(service.login('test@test.com', 'wrong')).rejects.toThrow(UnauthorizedException);
+  });
+});
+```
+
+- [ ] **为 WorkspaceService 添加完整单测**
+
+```typescript
+// apps/server/src/modules/auth/workspace.service.spec.ts
+describe('WorkspaceService', () => {
+  it('should generate unique slug', async () => { /* ... */ });
+  it('should auto-add owner as member with owner role', async () => { /* ... */ });
+  it('should list workspaces for a user', async () => { /* ... */ });
+  it('should add member with specified role', async () => { /* ... */ });
+});
+```
+
+- [ ] **为 SaaSBindingService 添加完整单测**
+
+```typescript
+// apps/server/src/modules/auth/saas-binding.service.spec.ts
+describe('SaaSBindingService', () => {
+  it('should encrypt credential before storing', async () => { /* ... */ });
+  it('should reject invalid credentials', async () => { /* ... */ });
+  it('should sync permissions on bind', async () => { /* ... */ });
+  it('should only unbind own bindings', async () => { /* ... */ });
+});
+```
+
+- [ ] **运行所有单测并检查覆盖率**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/server
+pnpm test -- --coverage --coverageThreshold='{"global":{"branches":90,"functions":90,"lines":90,"statements":90}}'
+```
+
+#### 步骤 B：集成测试
+
+- [ ] **Auth API 集成测试**
+
+```typescript
+// apps/server/test/auth.integration.spec.ts
+import { Test } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
+import * as request from 'supertest';
+
+describe('Auth API (integration)', () => {
+  let app: INestApplication;
+
+  beforeAll(async () => {
+    const module = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    app = module.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
+    await app.init();
+  });
+
+  it('POST /auth/register → should create user', () => {
+    return request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email: 'int@test.com', password: '123456', name: 'Integration' })
+      .expect(201)
+      .expect((res) => {
+        expect(res.body.email).toBe('int@test.com');
+        expect(res.body).not.toHaveProperty('passwordHash');
+      });
+  });
+
+  it('POST /auth/register → should reject duplicate email', () => {
+    return request(app.getHttpServer())
+      .post('/auth/register')
+      .send({ email: 'int@test.com', password: '123456', name: 'Dup' })
+      .expect(409);
+  });
+
+  it('POST /auth/login → should return JWT', () => {
+    return request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'int@test.com', password: '123456' })
+      .expect(201)
+      .expect((res) => {
+        expect(res.body.accessToken).toBeDefined();
+      });
+  });
+
+  it('POST /auth/login → should reject wrong password', () => {
+    return request(app.getHttpServer())
+      .post('/auth/login')
+      .send({ email: 'int@test.com', password: 'wrong' })
+      .expect(401);
+  });
+
+  it('GET /workspaces → should require auth', () => {
+    return request(app.getHttpServer()).get('/workspaces').expect(401);
+  });
+
+  afterAll(async () => { await app.close(); });
+});
+```
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/server && pnpm test -- test/auth.integration.spec.ts
+```
+
+#### 步骤 C：端到端测试（Playwright）
+
+- [ ] **编写用户注册/登录 E2E 测试**
+
+```typescript
+// apps/web/e2e/auth.spec.ts
+import { test, expect } from '@playwright/test';
+
+test('user can register and login', async ({ page }) => {
+  // 注册
+  await page.goto('/register');
+  await page.fill('[name="email"]', 'e2e-auth@test.com');
+  await page.fill('[name="password"]', '123456');
+  await page.fill('[name="name"]', 'E2E User');
+  await page.click('button[type="submit"]');
+  // 注册成功后跳转到主页面或登录页
+  await page.waitForURL('**/login**');
+
+  // 登录
+  await page.fill('[name="email"]', 'e2e-auth@test.com');
+  await page.fill('[name="password"]', '123456');
+  await page.click('button[type="submit"]');
+  // 登录成功后跳转到主页面
+  await page.waitForURL('**/chat**');
+  expect(await page.textContent('h1')).toContain('Sasa');
+});
+```
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/web && pnpm exec playwright test e2e/auth.spec.ts
+```
+
+#### 步骤 D：Code Review
+
+```
+检查清单:
+□ 密码存储: SHA-256 是否应升级为 bcrypt（建议记录为 TODO）
+□ JWT secret 是否从环境变量读取，默认值仅限开发环境
+□ DTO 校验: class-validator 装饰器完整（email 格式、密码长度）
+□ WorkspaceController: 所有端点有 JwtAuthGuard
+□ SaaSBindingService: 用户只能解绑自己的 binding
+□ JWT token 过期时间合理（7天）
+□ 注册接口有速率限制（防止暴力注册）
+□ 无敏感信息（密码、token）出现在日志中
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-3): auth module with register/login, workspace CRUD, SaaS binding
+
+- AuthService: register (SHA-256 hash) + login (JWT)
+- JwtAuthGuard for protected routes
+- WorkspaceService: create, list, add member
+- SaaSBindingService: bind (API Key), unbind, list
+- DTOs with class-validator
+- Unit tests: 90%+ coverage
+- Integration tests: full auth API flow
+- E2E tests: Playwright register → login → chat redirect
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```

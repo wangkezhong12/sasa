@@ -399,3 +399,115 @@ git add -A && git commit -m "feat: add Schema upload and management API"
 
 ---
 
+
+---
+
+### Chunk 4 验证流程
+
+#### 步骤 A：补充单测（覆盖率 ≥ 90%）
+
+- [ ] **为 ConnectorRegistry 补充测试**
+
+```typescript
+// connector-registry.service.spec.ts 追加
+it('should overwrite when registering same id', () => { /* ... */ });
+it('should return undefined for list when empty', () => { /* ... */ });
+```
+
+- [ ] **为 DemoConnector 补充 executeToolCall 测试**
+
+```typescript
+// demo/index.spec.ts 追加 — mock fetch 测试实际 HTTP 调用逻辑
+it('should return TOOL_NOT_FOUND for unknown tool', async () => {
+  const connector = new DemoConnector();
+  const result = await connector.executeToolCall('unknown_tool', {}, 'demo-key');
+  expect(result.success).toBe(false);
+  expect(result.error?.code).toBe('TOOL_NOT_FOUND');
+});
+```
+
+- [ ] **为 SchemaParserService 补充边界测试**
+
+```typescript
+// schema-parser.service.spec.ts 追加
+it('should handle paths with path parameters', () => { /* ... */ });
+it('should handle operations without operationId', () => { /* ... */ });
+it('should handle operations without summary', () => { /* ... */ });
+it('should handle DELETE method as risk level delete', () => { /* ... */ });
+it('should handle empty paths object', () => { /* ... */ });
+it('should handle YAML input (reject non-JSON)', () => { /* ... */ });
+```
+
+- [ ] **运行覆盖率检查**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/server && pnpm test -- --coverage
+```
+
+#### 步骤 B：集成测试
+
+- [ ] **Schema 上传 → 解析 → 发布全流程**
+
+```typescript
+// test/schema.integration.spec.ts
+describe('Schema API (integration)', () => {
+  it('should upload OpenAPI doc, parse tools, and publish', async () => {
+    // 1. POST /schemas/upload with valid OpenAPI JSON
+    // 2. GET /schemas/connectors → 验证 draft 状态
+    // 3. PATCH /schemas/tools/:id → 配置 requiredPermission
+    // 4. POST /schemas/connectors/:id/publish → 验证 active 状态
+  });
+
+  it('should reject invalid OpenAPI document', async () => {
+    // POST /schemas/upload with invalid JSON → 400
+  });
+});
+```
+
+#### 步骤 C：端到端测试（Playwright）
+
+- [ ] **SaaS 连接器添加和绑定 E2E**
+
+```typescript
+// apps/web/e2e/saas-connector.spec.ts
+test('user can add demo connector and bind account', async ({ page }) => {
+  // 前置: 已登录 + 已配置 LLM
+  await page.goto('/saas');
+  await page.click('text=添加 SaaS');
+  await page.click('text=Demo ERP');
+  await page.fill('[name="apiKey"]', 'demo-test-key');
+  await page.click('button:text("绑定")');
+  await expect(page.locator('text=Demo ERP')).toBeVisible();
+  await expect(page.locator('text=已绑定')).toBeVisible();
+});
+```
+
+#### 步骤 D：Code Review
+
+```
+检查清单:
+□ BaseRestConnector.executeToolCall: 无 SSRF 风险（URL 校验）
+□ SchemaParserService: 不信任用户输入，解析异常有兜底
+□ DemoConnector: 仅用于开发，生产环境不可注册
+□ ConnectorRegistry: 线程安全（Map 在 NestJS 单例中安全）
+□ Schema upload: 文件大小限制、内容长度限制
+□ tool_definitions: riskLevel 默认值合理（GET→read, POST→write）
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-4): connector registry, demo connector, OpenAPI schema parser
+
+- ConnectorRegistry: register/get/list connectors
+- DemoConnector: submit_leave + query_leave_balance for dev
+- SchemaParserService: OpenAPI 3.x → ToolDefinition conversion
+- SchemaService: upload, parse, publish (draft → active)
+- Unit tests: 90%+ coverage
+- Integration tests: full schema upload flow
+- E2E tests: SaaS connector binding
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```

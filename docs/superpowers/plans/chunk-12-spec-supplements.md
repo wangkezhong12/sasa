@@ -633,3 +633,148 @@ async refreshOAuthToken(userId: string, bindingId: string): Promise<void> {
 ```bash
 git add -A && git commit -m "feat: add OAuth token refresh with auto-check before execution"
 ```
+
+---
+
+### Chunk 12 验证流程
+
+#### 步骤 A：补充单测（覆盖率 ≥ 90%）
+
+- [ ] **为 RedisRateLimitGuard 添加单测**
+
+```typescript
+// apps/server/src/common/guards/rate-limit.guard.spec.ts
+describe('RedisRateLimitGuard', () => {
+  it('should allow requests within limit', async () => { /* ... */ });
+  it('should block requests exceeding limit', async () => { /* ... */ });
+  it('should have separate limits for user and workspace', async () => { /* ... */ });
+});
+```
+
+- [ ] **为 SystemConfigService 添加单测**
+
+```typescript
+describe('SystemConfigService.resolve', () => {
+  it('should return user config when set', async () => { /* ... */ });
+  it('should fall back to workspace config', async () => { /* ... */ });
+  it('should return platform default when no config', async () => { /* ... */ });
+});
+```
+
+- [ ] **为 AuditCleanupTask 添加单测**
+
+```typescript
+describe('AuditCleanupTask.cleanup', () => {
+  it('should delete logs older than retention period', async () => { /* ... */ });
+  it('should not delete recent logs', async () => { /* ... */ });
+});
+```
+
+- [ ] **为 OAuth refresh 添加单测**
+
+```typescript
+describe('SaaSBindingService.refreshOAuthToken', () => {
+  it('should refresh token and update binding', async () => { /* ... */ });
+  it('should mark binding as expired on refresh failure', async () => { /* ... */ });
+  it('should skip non-OAuth bindings', async () => { /* ... */ });
+});
+```
+
+- [ ] **运行覆盖率检查**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/server && pnpm test -- --coverage
+```
+
+#### 步骤 B：集成测试
+
+- [ ] **速率限制 + Redis 降级 + 审计清理 集成测试**
+
+```typescript
+// test/spec-supplements.integration.spec.ts
+describe('Spec supplements (integration)', () => {
+  it('should rate limit after 20 requests per minute', async () => {
+    // 连续发送 21 次请求，第 21 次应返回 429
+  });
+
+  it('should fall back to DB when Redis is down', async () => {
+    // 停止 Redis，验证权限查询仍然工作（从 DB 读取）
+  });
+
+  it('should clean up old audit logs', async () => {
+    // 插入 91 天前的审计日志，运行清理，验证被删除
+  });
+});
+```
+
+#### 步骤 C：端到端测试（Playwright）
+
+- [ ] **速率限制和 LLM 失效 E2E**
+
+```typescript
+// apps/web/e2e/spec-supplements.spec.ts
+test('LLM API key failure shows error prompt', async ({ page }) => {
+  // 配置一个无效的 API Key
+  await page.goto('/settings');
+  await page.selectOption('[name="provider"]', 'openai');
+  await page.fill('[name="apiKey"]', 'sk-invalid-key');
+  await page.click('button:text("保存")');
+
+  // 尝试聊天
+  await page.goto('/chat');
+  await page.fill('[placeholder="输入消息..."]', '你好');
+  await page.click('button:text("发送")');
+
+  // 应该看到 API Key 失效提示
+  await expect(page.locator('text=API Key')).toBeVisible({ timeout: 15000 });
+});
+
+test('SSE reconnects after server restart', async ({ page }) => {
+  // 建立聊天连接，重启后端，验证前端自动重连
+  await page.goto('/chat');
+  await page.fill('[placeholder="输入消息..."]', '测试重连');
+  await page.click('button:text("发送")');
+  // 后端重启后验证 SSE 重连
+  await expect(page.locator('[data-role="assistant"]')).toBeVisible({ timeout: 30000 });
+});
+```
+
+#### 步骤 D：Code Review
+
+```
+检查清单:
+□ Rate limiting: Redis key 设计不冲突（user vs workspace 前缀）
+□ RLS policy: audit_logs 只允许 INSERT + SELECT
+□ Audit cleanup: 使用事务删除，避免锁表
+□ OAuth refresh: refresh_token 加密存储
+□ SystemConfig: 配置层级查找无死循环
+□ Docker Compose: 不含生产环境配置
+□ .env.example: 更新了新增的环境变量
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-12): spec supplements — rate limiting, RLS, Redis degradation, SSE auth
+
+- Docker Compose for local PostgreSQL + Redis
+- class-validator global ValidationPipe
+- LLM Config CRUD API with test-connection
+- SystemConfig API with hierarchical resolution
+- Redis-based rate limiting (user 20/min, workspace 100/min)
+- Audit logs RLS policy + 90-day cleanup cron
+- Redis degradation fallback for permissions
+- SSE reconnection with exponential backoff
+- SSE JWT authentication via query parameter
+- SaaS API retry-once on network error
+- LLM API Key failure handling with user notification
+- Tool definition threshold filtering (50+ tools)
+- OAuth token auto-refresh with expiry check
+- Unit tests: 90%+ coverage
+- Integration tests: rate limiting, Redis fallback, audit cleanup
+- E2E tests: LLM failure handling, SSE reconnection
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```

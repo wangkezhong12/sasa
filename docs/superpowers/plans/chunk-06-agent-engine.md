@@ -422,3 +422,137 @@ git add -A && git commit -m "feat: add AgentService with LLM orchestration"
 
 ---
 
+
+---
+
+### Chunk 6 验证流程
+
+#### 步骤 A：补充单测（覆盖率 ≥ 90%）
+
+- [ ] **为 LLMConfigService 补充边界测试**
+
+```typescript
+it('should throw when no config found', async () => { /* ... */ });
+it('should fall back to workspace config', async () => { /* ... */ });
+it('should decrypt API key before returning', async () => { /* ... */ });
+```
+
+- [ ] **为 PromptBuilderService 补充测试**
+
+```typescript
+it('should include all required sections', () => { /* ... */ });
+it('should omit custom instructions when not provided', () => { /* ... */ });
+it('should handle empty user name', () => { /* ... */ });
+```
+
+- [ ] **为 ContextManagerService 补充测试**
+
+```typescript
+it('should keep messages within context window budget', () => { /* ... */ });
+it('should handle empty message list', () => { /* ... */ });
+it('should handle single message', () => { /* ... */ });
+```
+
+- [ ] **为 ConfirmationManager 补充测试**
+
+```typescript
+it('should ignore resolve for unknown id', () => { /* ... */ });
+it('should handle multiple sequential confirmations', async () => { /* ... */ });
+it('should handle modify action with new parameters', async () => { /* ... */ });
+```
+
+- [ ] **为 ToolRegistry 补充测试**
+
+```typescript
+it('should handle empty tool list', () => { /* ... */ });
+it('should filter tools by threshold', () => { /* ... */ });
+it('should convert complex parameter schemas', () => { /* ... */ });
+```
+
+- [ ] **运行覆盖率检查**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/server && pnpm test -- --coverage
+```
+
+#### 步骤 B：集成测试
+
+- [ ] **Agent 完整推理流程（mock LLM）**
+
+```typescript
+// test/agent.integration.spec.ts
+describe('Agent integration', () => {
+  it('should process message → tool call → confirmation → result', async () => {
+    // Mock streamText 返回一个 tool_call
+    // Mock ConfirmationManager 立即 resolve
+    // 验证整个流程: LLM 调用 → 工具过滤 → 确认等待 → 执行 → 审计日志
+  });
+
+  it('should handle LLM returning text only (no tool call)', async () => {
+    // Mock streamText 返回纯文本
+    // 验证直接返回，无工具调用
+  });
+
+  it('should respect max 5 tool call steps', async () => {
+    // Mock streamText 持续返回 tool_call
+    // 验证第 5 步后强制中断并附加提示
+  });
+});
+```
+
+#### 步骤 C：端到端测试（Playwright）
+
+- [ ] **对话 + Tool Call 确认 E2E**
+
+```typescript
+// apps/web/e2e/agent-chat.spec.ts
+test('user sends message and confirms tool call', async ({ page }) => {
+  // 前置: 已登录 + 已配置 LLM + 已绑定 demo connector
+  await page.goto('/chat');
+  await page.fill('[placeholder="输入消息..."]', '帮我提交一个年假申请，下周一到周三');
+  await page.click('button:text("发送")');
+
+  // 等待确认卡片出现
+  await expect(page.locator('text=确认执行')).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('text=提交请假申请')).toBeVisible();
+
+  // 点击确认
+  await page.click('button:text("确认执行")');
+
+  // 等待 Agent 回复结果
+  await expect(page.locator('text=已提交')).toBeVisible({ timeout: 30000 });
+});
+```
+
+#### 步骤 D：Code Review
+
+```
+检查清单:
+□ LLMConfigService: API Key 解密后不泄露到日志
+□ AgentService: streamText 错误处理（401/403 → llm_auth_error）
+□ ConfirmationManager: 内存 Map 不会泄漏（超时后自动清理）
+□ ToolRegistry: 大量工具时性能可接受
+□ ContextManager: 裁剪策略不丢失关键上下文
+□ maxSteps=5 边界: 第 5 步后的中止逻辑正确
+□ System prompt 不包含用户敏感信息
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-6): agent engine with LLM orchestration, tool calling, confirmation
+
+- LLMConfigService: user/workspace config resolution
+- PromptBuilderService: dynamic system prompt construction
+- ContextManagerService: message trimming with round budget
+- ConfirmationManager: in-memory pending with timeout
+- ToolRegistry: DB loading + AI SDK conversion + threshold filtering
+- AgentService: multi-step tool calling with confirmation flow
+- Unit tests: 90%+ coverage
+- Integration tests: full agent reasoning loop
+- E2E tests: chat with tool call confirmation
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```

@@ -622,3 +622,173 @@ git add -A && git commit -m "feat: add RedisModule with ioredis"
 
 ---
 
+
+---
+
+### Chunk 2 验证流程
+
+#### 步骤 A：补充单测（覆盖率 ≥ 90%）
+
+- [ ] **为 CryptoService 补充边界测试**
+
+```typescript
+// apps/server/src/common/crypto/crypto.service.spec.ts 追加
+it('should reject empty plaintext', () => {
+  expect(() => service.encrypt('')).not.toThrow();
+  expect(service.decrypt(service.encrypt(''))).toBe('');
+});
+
+it('should throw on invalid ciphertext format', () => {
+  expect(() => service.decrypt('invalid')).toThrow();
+  expect(() => service.decrypt('not:enough')).toThrow();
+});
+
+it('should throw on tampered ciphertext', () => {
+  const encrypted = service.encrypt('secret');
+  const parts = encrypted.split(':');
+  parts[2] = 'a'.repeat(32); // 篡改密文
+  expect(() => service.decrypt(parts.join(':'))).toThrow();
+});
+
+it('should throw when ENCRYPTION_KEY is missing', () => {
+  delete process.env.ENCRYPTION_KEY;
+  expect(() => new CryptoService()).toThrow('ENCRYPTION_KEY');
+});
+```
+
+- [ ] **为 database schema 添加完整性测试**
+
+```typescript
+// apps/server/src/common/database/schema-full.spec.ts
+import * as schema from './schema';
+
+describe('database schema completeness', () => {
+  const requiredTables = ['users', 'workspaces', 'workspaceMembers', 'saasConnectors',
+    'saasBindings', 'conversations', 'messages', 'toolDefinitions', 'auditLogs',
+    'llmConfigs', 'systemConfigs'];
+
+  it.each(requiredTables)('should define %s table', (table) => {
+    expect(schema[table]).toBeDefined();
+  });
+
+  it('users table should have passwordHash column', () => {
+    expect(schema.users.passwordHash).toBeDefined();
+  });
+
+  it('saasBindings should have unique constraint on userId+connectorId', () => {
+    // 验证 Drizzle schema 的 unique 定义
+    expect(schema.saasBindings).toBeDefined();
+  });
+});
+```
+
+- [ ] **运行所有单测并检查覆盖率**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/server
+pnpm test -- --coverage --coverageThreshold='{"global":{"branches":90,"functions":90,"lines":90,"statements":90}}'
+```
+
+Expected: 所有测试通过，覆盖率 ≥ 90%
+
+#### 步骤 B：集成测试
+
+- [ ] **验证数据库连接和表创建**
+
+```typescript
+// apps/server/test/database.integration.spec.ts
+import { drizzle } from 'drizzle-orm/postgres-js';
+import postgres from 'postgres';
+import * as schema from '../src/common/database/schema';
+
+describe('Database integration', () => {
+  let db: any;
+  let client: any;
+
+  beforeAll(() => {
+    client = postgres(process.env.DATABASE_URL!);
+    db = drizzle(client, { schema });
+  });
+
+  afterAll(async () => {
+    await client.end();
+  });
+
+  it('should connect to PostgreSQL', async () => {
+    const result = await db.execute('SELECT 1 as check');
+    expect(result[0].check).toBe(1);
+  });
+
+  it('should have all required tables', async () => {
+    const tables = await db.execute(
+      "SELECT tablename FROM pg_tables WHERE schemaname = 'public'"
+    );
+    const tableNames = tables.map((t: any) => t.tablename);
+    expect(tableNames).toContain('users');
+    expect(tableNames).toContain('workspaces');
+    expect(tableNames).toContain('audit_logs');
+    expect(tableNames).toContain('system_configs');
+  });
+
+  it('CryptoService should roundtrip with database storage', async () => {
+    const crypto = new CryptoService();
+    const secret = 'sk-test-api-key-12345';
+    const encrypted = crypto.encrypt(secret);
+    // 模拟存入数据库再读出
+    await db.insert(schema.saasBindings).values({
+      userId: 'test-user', connectorId: 'test-connector',
+      authType: 'api_key', encryptedCred: encrypted,
+    }).onConflictDoNothing();
+    const [row] = await db.select().from(schema.saasBindings)
+      .where(eq(schema.saasBindings.userId, 'test-user'));
+    expect(crypto.decrypt(row.encryptedCred)).toBe(secret);
+  });
+});
+```
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/server
+pnpm test -- test/database.integration.spec.ts
+```
+
+#### 步骤 C：端到端测试（Playwright）
+
+> Chunk 2 为基础设施层，无用户界面。跳过 Playwright。
+
+- [ ] **标记为 N/A — Chunk 2 为数据库/基础设施层**
+
+#### 步骤 D：Code Review
+
+- [ ] **审查以下风险点**
+
+```
+检查清单:
+□ CryptoService: AES-256-GCM 密钥来自环境变量，不硬编码
+□ CryptoService: IV 每次随机生成（不重用）
+□ Schema: encrypted_cred 存储为 text（hex:hex:hex 格式），与 CryptoService 输出一致
+□ Schema: passwordHash 使用 sha256（评估是否应升级为 bcrypt/argon2）
+□ Schema: 所有外键引用正确
+□ Schema: audit_logs 表无 UPDATE/DELETE 路径（应用层限制）
+□ RedisModule: 连接错误有日志但不崩溃
+□ DatabaseModule: 连接池配置合理
+□ .env.example 中 ENCRYPTION_KEY 有生成说明
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-2): database schema, CryptoService, Redis module
+
+- Drizzle ORM with 11 tables (users, workspaces, workspace_members,
+  saas_connectors, saas_bindings, conversations, messages,
+  tool_definitions, audit_logs, llm_configs, system_configs)
+- CryptoService: AES-256-GCM encryption for credentials and API keys
+- RedisModule: ioredis global provider
+- DatabaseModule: drizzle + postgres connection
+- Unit tests: 90%+ coverage on CryptoService
+- Integration tests: DB connection and schema verification
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```

@@ -222,3 +222,122 @@ git add -A && git commit -m "feat: add workspace settings page"
 
 ---
 
+
+---
+
+### Chunk 10 验证流程
+
+#### 步骤 A：补充单测（覆盖率 ≥ 90%）
+
+- [ ] **为 SaaS 管理组件添加测试**
+
+```typescript
+// apps/web/src/components/saas/saas-card.spec.tsx
+describe('SaaSCard', () => {
+  it('should display connector name and status', () => { /* ... */ });
+  it('should show bound status when connected', () => { /* ... */ });
+  it('should call onDisconnect when disconnect clicked', () => { /* ... */ });
+});
+```
+
+- [ ] **为 LLM Config Form 添加测试**
+
+```typescript
+// apps/web/src/components/settings/llm-config-form.spec.tsx
+describe('LLMConfigForm', () => {
+  it('should render provider selector', () => { /* ... */ });
+  it('should show model options when provider selected', () => { /* ... */ });
+  it('should validate API key is not empty', () => { /* ... */ });
+  it('should call onSubmit with valid form data', () => { /* ... */ });
+});
+```
+
+- [ ] **运行覆盖率检查**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/web && pnpm test -- --coverage
+```
+
+#### 步骤 B：集成测试
+
+- [ ] **SaaS 管理 + LLM 配置页面交互**
+
+```typescript
+describe('SaaS management page', () => {
+  it('should list connected SaaS apps', () => { /* ... */ });
+  it('should open add dialog on button click', () => { /* ... */ });
+});
+
+describe('Settings page', () => {
+  it('should show current LLM config', () => { /* ... */ });
+  it('should save new config', () => { /* ... */ });
+});
+```
+
+#### 步骤 C：端到端测试（Playwright）
+
+- [ ] **SaaS 管理全流程 E2E**
+
+```typescript
+// apps/web/e2e/saas-management.spec.ts
+test('add demo connector via preset', async ({ page }) => {
+  await page.goto('/saas');
+  await page.click('text=添加 SaaS');
+  await page.click('text=Demo ERP');
+  await page.fill('[name="apiKey"]', 'demo-test-key');
+  await page.click('button:text("绑定")');
+  await expect(page.locator('text=已连接')).toBeVisible();
+});
+
+test('disconnect SaaS connector', async ({ page }) => {
+  await page.goto('/saas');
+  await page.click('button:text("断开")');
+  await page.click('button:text("确认")');
+  await expect(page.locator('text=已断开')).toBeVisible();
+});
+```
+
+- [ ] **LLM 配置全流程 E2E**
+
+```typescript
+// apps/web/e2e/llm-config.spec.ts
+test('first-time LLM configuration', async ({ page }) => {
+  // 新用户首次进入应看到引导页
+  await page.goto('/');
+  await expect(page.locator('text=配置你的 AI 模型')).toBeVisible();
+  await page.selectOption('[name="provider"]', 'openai');
+  await page.fill('[name="apiKey"]', 'sk-test-key');
+  await page.selectOption('[name="model"]', 'gpt-4o');
+  await page.click('button:text("保存并开始")');
+  await expect(page).toHaveURL(/.*\/chat/);
+});
+```
+
+#### 步骤 D：Code Review
+
+```
+检查清单:
+□ SaaS 绑定: API Key 输入框用 type="password"
+□ LLM 配置: API Key 不存入 localStorage（仅服务端加密存储）
+□ 断开绑定: 有二次确认对话框
+□ 工作空间设置: 成员管理有权限检查（仅 owner/admin）
+□ 文件上传 (OpenAPI): 限制文件类型和大小
+□ 引导页: 未配置 LLM 时禁用聊天输入
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-10): SaaS management, LLM config, workspace settings pages
+
+- SaaS management: list, add (preset/OpenAPI), bind, disconnect
+- LLM config: provider selection, API key input, test connection
+- Onboarding: first-time LLM setup with redirect
+- Workspace settings: members, connectors, space config
+- Unit tests: 90%+ coverage
+- E2E tests: full SaaS and LLM configuration flows
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```

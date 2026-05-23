@@ -207,3 +207,53 @@ git add -A && git commit -m "test: add Playwright E2E tests"
 
 ---
 
+
+---
+
+### Chunk 11 验证流程
+
+> Chunk 11 本身即为端到端测试 Chunk，验证步骤整合在任务中。
+
+#### 步骤 A：补充单测
+
+- [ ] **N/A — Chunk 11 为测试 Chunk，无新增业务代码**
+
+#### 步骤 B：集成测试
+
+- [ ] **N/A — Chunk 11 的内容即为集成/端到端测试**
+
+#### 步骤 C：端到端测试
+
+- [ ] **执行所有 Playwright 测试套件**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/web
+pnpm exec playwright test
+```
+
+Expected: 所有测试通过
+
+#### 步骤 D：Code Review
+
+```
+检查清单:
+□ E2E 测试不依赖硬编码数据（使用动态生成的测试数据）
+□ E2E 测试有清理逻辑（测试后删除创建的数据）
+□ Playwright config: baseURL 正确
+□ 测试超时设置合理（LLM 调用可能较慢）
+□ CI 集成配置（如适用）
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-11): end-to-end test suite
+
+- Backend E2E: full chat flow with tool confirmation
+- Frontend E2E: Playwright tests for auth, chat, SaaS, settings
+- All E2E tests passing
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```

@@ -255,3 +255,122 @@ git add -A && git commit -m "feat: add ChatController with SSE streaming and too
 
 ---
 
+
+---
+
+### Chunk 7 验证流程
+
+#### 步骤 A：补充单测（覆盖率 ≥ 90%）
+
+- [ ] **为 ConversationService 补充测试**
+
+```typescript
+describe('ConversationService', () => {
+  it('should create conversation with optional workspace/connector', async () => { /* ... */ });
+  it('should list conversations ordered by updatedAt desc', async () => { /* ... */ });
+  it('should return null for non-existent conversation', async () => { /* ... */ });
+  it('should update title', async () => { /* ... */ });
+});
+```
+
+- [ ] **为 SSEService 补充测试**
+
+```typescript
+describe('SSEService', () => {
+  it('should clean up client on disconnect', (done) => { /* ... */ });
+  it('should handle push to disconnected client gracefully', () => { /* ... */ });
+  it('should support multiple concurrent clients', () => { /* ... */ });
+});
+```
+
+- [ ] **运行覆盖率检查**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/server && pnpm test -- --coverage
+```
+
+#### 步骤 B：集成测试
+
+- [ ] **Chat API 完整流程**
+
+```typescript
+// test/chat.integration.spec.ts
+describe('Chat API (integration)', () => {
+  it('should create conversation, send message, receive SSE events', async () => {
+    // 1. POST /chat/conversations → 创建对话
+    // 2. 连接 SSE /chat/stream/:clientId
+    // 3. POST /chat/conversations/:id/messages → 发送消息
+    // 4. 验证 SSE 收到事件流
+  });
+
+  it('should handle tool confirmation via POST /chat/confirm', async () => {
+    // 1. 发送触发 tool call 的消息
+    // 2. 收到 tool_confirmation_required 事件
+    // 3. POST /chat/confirm with action: 'confirm'
+    // 4. 收到最终结果事件
+  });
+
+  it('should load conversation history', async () => {
+    // GET /chat/conversations/:id/messages → 返回历史消息
+  });
+});
+```
+
+#### 步骤 C：端到端测试（Playwright）
+
+- [ ] **完整对话 E2E（含 SSE 流式）**
+
+```typescript
+// apps/web/e2e/chat-flow.spec.ts
+test('full chat flow with SSE streaming', async ({ page }) => {
+  await page.goto('/chat');
+  // 创建新对话
+  await page.click('text=新对话');
+  // 发送消息
+  await page.fill('[placeholder="输入消息..."]', '你好');
+  await page.click('button:text("发送")');
+  // 验证 Agent 回复以流式方式出现（文字逐步显示）
+  const responseText = page.locator('[data-role="assistant"]').last();
+  await expect(responseText).toBeVisible({ timeout: 30000 });
+});
+
+test('chat history persists after page reload', async ({ page }) => {
+  // 发送消息后刷新页面，验证历史消息还在
+  await page.goto('/chat');
+  await page.fill('[placeholder="输入消息..."]', '测试持久化');
+  await page.click('button:text("发送")');
+  await page.reload();
+  await expect(page.locator('text=测试持久化')).toBeVisible();
+});
+```
+
+#### 步骤 D：Code Review
+
+```
+检查清单:
+□ SSE 端点有 JWT 认证（query param token）
+□ ChatController: 所有端点有 JwtAuthGuard
+□ SSE 连接泄漏: finalize 中清理 Map
+□ 消息持久化: user 和 assistant 消息都入库
+□ conversation.connectorId 可为 null（支持切换 SaaS）
+□ ConfirmToolDto: action 枚举校验 (confirm/cancel/modify)
+□ SSE 推送数据不包含敏感信息（加密凭证等）
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-7): chat gateway with SSE streaming, tool confirmation, history
+
+- ConversationService: CRUD with workspace/connector association
+- SSEService: Subject-based streaming with client management
+- ChatController: conversations, messages, SSE stream, confirm
+- JWT auth on SSE endpoint via query parameter
+- Unit tests: 90%+ coverage
+- Integration tests: full chat API flow
+- E2E tests: streaming chat with history persistence
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```

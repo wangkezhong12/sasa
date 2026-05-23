@@ -268,3 +268,122 @@ git add -A && git commit -m "feat: add login/register pages with NextAuth"
 
 ---
 
+
+---
+
+### Chunk 8 验证流程
+
+#### 步骤 A：补充单测（覆盖率 ≥ 90%）
+
+- [ ] **为 API Client 添加单测**
+
+```typescript
+// apps/web/src/lib/api.spec.ts
+import { apiFetch } from './api';
+
+describe('apiFetch', () => {
+  it('should add auth header when token exists', async () => { /* mock fetch */ });
+  it('should throw on non-ok response', async () => { /* ... */ });
+  it('should work without token', async () => { /* ... */ });
+});
+```
+
+- [ ] **为 useSSE hook 添加单测**
+
+```typescript
+// apps/web/src/hooks/use-sse.spec.ts — 使用 @testing-library/react-hooks
+```
+
+- [ ] **为 Layout 组件添加渲染测试**
+
+```typescript
+// apps/web/src/components/layout/sidebar.spec.tsx
+import { render, screen } from '@testing-library/react';
+import { Sidebar } from './sidebar';
+
+describe('Sidebar', () => {
+  it('should render navigation items', () => {
+    render(<Sidebar />);
+    expect(screen.getByText('对话')).toBeInTheDocument();
+    expect(screen.getByText('SaaS 管理')).toBeInTheDocument();
+  });
+});
+```
+
+- [ ] **运行覆盖率检查**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/web && pnpm test -- --coverage
+```
+
+#### 步骤 B：集成测试
+
+- [ ] **前端构建 + 页面渲染验证**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/web
+pnpm build
+pnpm start &
+sleep 5
+curl -s http://localhost:3000 | grep -q 'Sasa' && echo "OK" || echo "FAIL"
+kill %1
+```
+
+#### 步骤 C：端到端测试（Playwright）
+
+- [ ] **登录/注册页面渲染和交互**
+
+```typescript
+// apps/web/e2e/auth-ui.spec.ts
+test('login page renders correctly', async ({ page }) => {
+  await page.goto('/login');
+  await expect(page.locator('[name="email"]')).toBeVisible();
+  await expect(page.locator('[name="password"]')).toBeVisible();
+  await expect(page.locator('button:text("登录")')).toBeVisible();
+  await expect(page.locator('text=注册')).toBeVisible();
+});
+
+test('register page validates inputs', async ({ page }) => {
+  await page.goto('/register');
+  await page.click('button[type="submit"]');
+  // 应该显示验证错误
+  await expect(page.locator('text=请输入邮箱')).toBeVisible();
+});
+
+test('sidebar navigation works', async ({ page }) => {
+  // 登录后验证侧边栏导航
+  await page.goto('/chat');
+  await page.click('text=SaaS 管理');
+  await expect(page).toHaveURL(/.*\/saas/);
+});
+```
+
+#### 步骤 D：Code Review
+
+```
+检查清单:
+□ NextAuth session token 安全存储（httpOnly cookie）
+□ API Client: token 不暴露到 URL 中
+□ Layout: 响应式设计（移动端侧边栏折叠）
+□ Auth pages: 无 XSS 风险（React 默认转义）
+□ .env.local 中 NEXT_PUBLIC_API_URL 配置正确
+□ CORS 配置: server 端允许前端域名
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-8): frontend layout, API client, SSE hook, auth pages
+
+- Sidebar layout with navigation (chat, SaaS, workspace, settings)
+- API client with JWT auth headers
+- useSSE hook with exponential backoff reconnection
+- NextAuth.js integration with credentials provider
+- Login/register pages with form validation
+- Unit tests: 90%+ coverage on lib/hooks
+- E2E tests: auth UI rendering and navigation
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```

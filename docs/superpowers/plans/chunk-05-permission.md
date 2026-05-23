@@ -257,3 +257,106 @@ git add -A && git commit -m "feat: add AuditService with append-only logging"
 
 ---
 
+
+---
+
+### Chunk 5 验证流程
+
+#### 步骤 A：补充单测（覆盖率 ≥ 90%）
+
+- [ ] **为 PermissionService 补充 Redis 降级测试**
+
+```typescript
+// permission.service.spec.ts 追加
+describe('PermissionService.filterTools', () => {
+  it('should include tools without requiredPermission', () => { /* ... */ });
+  it('should exclude tools user has no permission for', () => { /* ... */ });
+  it('should return empty for empty permission list', () => { /* ... */ });
+});
+
+describe('PermissionService.getPermissions', () => {
+  it('should return cached permissions from Redis', async () => { /* ... */ });
+  it('should fall back to database when Redis fails', async () => { /* ... */ });
+  it('should return empty array when no binding exists', async () => { /* ... */ });
+});
+
+describe('PermissionService.syncPermissions', () => {
+  it('should call connector.fetchPermissions and update DB + cache', async () => { /* ... */ });
+  it('should return empty when binding not found', async () => { /* ... */ });
+});
+```
+
+- [ ] **为 AuditService 补充查询测试**
+
+```typescript
+// audit.service.spec.ts 追加
+it('should find audit logs by user with limit', async () => { /* ... */ });
+it('should log with all optional fields', async () => { /* ... */ });
+it('should log with minimal required fields', async () => { /* ... */ });
+```
+
+- [ ] **运行覆盖率检查**
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa/apps/server && pnpm test -- --coverage
+```
+
+#### 步骤 B：集成测试
+
+- [ ] **权限过滤 + 审计日志全流程**
+
+```typescript
+// test/permission.integration.spec.ts
+describe('Permission flow (integration)', () => {
+  it('should filter tools based on user permissions and log audit', async () => {
+    // 1. 创建用户 + 绑定 demo connector（permissions: ['leave:submit', 'leave:view']）
+    // 2. 调用 PermissionService.getPermissions → 返回正确权限
+    // 3. 调用 PermissionService.filterTools → 过滤掉 leave:approve
+    // 4. 调用 AuditService.log → 写入审计日志
+    // 5. 调用 AuditService.findByUser → 返回刚才的日志
+  });
+});
+```
+
+#### 步骤 C：端到端测试（Playwright）
+
+- [ ] **权限隔离 E2E 测试**
+
+```typescript
+// apps/web/e2e/permission.spec.ts
+test('user can only see permitted tools in chat', async ({ page }) => {
+  // 前置: 用户绑定了 demo connector
+  await page.goto('/chat');
+  await page.fill('[placeholder="输入消息..."]', '查询我的假期余额');
+  await page.click('button:text("发送")');
+  // Agent 应该能成功调用 query_leave_balance
+  await expect(page.locator('text=假期余额')).toBeVisible({ timeout: 10000 });
+});
+```
+
+#### 步骤 D：Code Review
+
+```
+检查清单:
+□ PermissionService: Redis 缓存 TTL 合理（30 分钟）
+□ PermissionService: Redis 故障时优雅降级（try/catch + DB 回退）
+□ AuditService: 仅暴露 create + find，无 update/delete 方法
+□ filterTools: 空权限列表不意外放行所有工具
+□ 审计日志不记录敏感信息（API Key、密码等）
+```
+
+#### 步骤 E：Git 提交
+
+```bash
+cd /Users/wangkezhong/claude_proj/sasa
+git add -A
+git commit -m "feat(chunk-5): permission filtering with Redis cache, audit logging
+
+- PermissionService: filter tools by user permissions, Redis cache with 30min TTL
+- AuditService: append-only logging, find by user
+- Redis degradation: fallback to DB when Redis unavailable
+- Unit tests: 90%+ coverage
+- Integration tests: permission + audit flow
+
+Co-Authored-By: Claude Opus 4.6 <noreply@anthropic.com>"
+```
