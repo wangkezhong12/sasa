@@ -4,6 +4,17 @@ import { DB } from './common/database/database.module';
 import { REDIS } from './common/redis/redis.module';
 import { CryptoService } from './common/crypto/crypto.service';
 
+// Mock AI SDK modules to avoid real API calls during module compilation
+jest.mock('ai', () => ({
+  streamText: jest.fn(),
+}));
+jest.mock('@ai-sdk/openai', () => ({
+  createOpenAI: jest.fn().mockReturnValue(jest.fn().mockReturnValue('mock-model')),
+}));
+jest.mock('@ai-sdk/anthropic', () => ({
+  createAnthropic: jest.fn().mockReturnValue(jest.fn().mockReturnValue('mock-model')),
+}));
+
 describe('AppModule', () => {
   let app: TestingModule;
 

@@ -4,6 +4,8 @@ import { RedisModule } from './common/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { ConnectorModule } from './modules/connector/connector.module';
 import { SchemaModule } from './modules/schema/schema.module';
+import { PermissionModule } from './modules/permission/permission.module';
+import { AgentModule } from './modules/agent/agent.module';
 
-@Module({ imports: [DatabaseModule, RedisModule, AuthModule, ConnectorModule, SchemaModule] })
+@Module({ imports: [DatabaseModule, RedisModule, AuthModule, ConnectorModule, SchemaModule, PermissionModule, AgentModule] })
 export class AppModule {}
