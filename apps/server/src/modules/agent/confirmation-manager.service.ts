@@ -10,8 +10,21 @@ export interface ConfirmationResult {
 @Injectable()
 export class ConfirmationManager {
   private pending = new Map<string, { timer: NodeJS.Timeout; resolve: (v: ConfirmationResult) => void }>();
+  private static readonly MAX_PENDING = 1000;
 
+  /** Generate a unique confirmation ID */
+  createId(): string {
+    return `confirm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  /** Register a pending confirmation. Returns a promise that resolves when the user responds or timeout expires. */
   create(id: string, timeoutMs?: number): Promise<ConfirmationResult> {
+    if (this.pending.has(id)) {
+      throw new Error(`Confirmation ${id} already exists`);
+    }
+    if (this.pending.size >= ConfirmationManager.MAX_PENDING) {
+      throw new Error('Too many pending confirmations');
+    }
     const timeout = timeoutMs ?? DEFAULT_CONFIRMATION_TIMEOUT_SECONDS * 1000;
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
@@ -20,6 +33,21 @@ export class ConfirmationManager {
       }, timeout);
       this.pending.set(id, { timer, resolve });
     });
+  }
+
+  /** Register a pending confirmation without awaiting — used when returning confirmation_required to client */
+  register(id: string, timeoutMs?: number): void {
+    if (this.pending.has(id)) {
+      throw new Error(`Confirmation ${id} already exists`);
+    }
+    if (this.pending.size >= ConfirmationManager.MAX_PENDING) {
+      throw new Error('Too many pending confirmations');
+    }
+    const timeout = timeoutMs ?? DEFAULT_CONFIRMATION_TIMEOUT_SECONDS * 1000;
+    const timer = setTimeout(() => {
+      this.pending.delete(id);
+    }, timeout);
+    this.pending.set(id, { timer, resolve: () => {} });
   }
 
   resolve(id: string, result: ConfirmationResult) {

@@ -6,7 +6,7 @@ import { CryptoService } from './common/crypto/crypto.service';
 
 // Mock AI SDK modules to avoid real API calls during module compilation
 jest.mock('ai', () => ({
-  streamText: jest.fn(),
+  generateText: jest.fn(),
 }));
 jest.mock('@ai-sdk/openai', () => ({
   createOpenAI: jest.fn().mockReturnValue(jest.fn().mockReturnValue('mock-model')),

@@ -17,7 +17,7 @@ export class PermissionService {
     private crypto: CryptoService,
   ) {}
 
-  filterTools<T extends { requiredPermission: string }>(tools: T[], permissions: string[]): T[] {
+  filterTools<T extends { requiredPermission: string | null }>(tools: T[], permissions: string[]): T[] {
     return tools.filter((t) => t.requiredPermission && permissions.includes(t.requiredPermission));
   }
 

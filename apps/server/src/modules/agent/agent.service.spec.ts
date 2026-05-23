@@ -10,11 +10,10 @@ import { PromptBuilderService } from './prompt-builder.service';
 import { ContextManagerService } from './context-manager.service';
 import { ConfirmationManager } from './confirmation-manager.service';
 import { ToolRegistryService } from './tool-registry.service';
-import { REDIS } from '../../common/redis/redis.module';
 
 // Mock the AI SDK
 jest.mock('ai', () => ({
-  streamText: jest.fn(),
+  generateText: jest.fn(),
 }));
 jest.mock('@ai-sdk/openai', () => ({
   createOpenAI: jest.fn().mockReturnValue(jest.fn().mockReturnValue('mock-model')),
@@ -23,18 +22,44 @@ jest.mock('@ai-sdk/anthropic', () => ({
   createAnthropic: jest.fn().mockReturnValue(jest.fn().mockReturnValue('mock-model')),
 }));
 
-import { streamText } from 'ai';
+import { generateText } from 'ai';
 
 describe('AgentService', () => {
   let service: AgentService;
+  let confirmationManager: ConfirmationManager;
   let mockDb: any;
-  let mockRedis: any;
   let mockCrypto: any;
   let mockRegistry: any;
   let mockPermission: any;
   let mockAudit: any;
   let mockLLMConfig: any;
   let mockToolRegistry: any;
+
+  // Helper to set up DB mocks for processMessage
+  function setupDbMocks() {
+    const historyChain = {
+      from: jest.fn().mockReturnValue({
+        where: jest.fn().mockReturnValue({
+          orderBy: jest.fn().mockResolvedValue([]),
+        }),
+      }),
+    };
+    const connectorChain = {
+      from: jest.fn().mockReturnValue({
+        where: jest.fn().mockResolvedValue([{ name: 'Demo ERP' }]),
+      }),
+    };
+    const bindingChain = {
+      from: jest.fn().mockReturnValue({
+        where: jest.fn().mockResolvedValue([{ saasUsername: 'TestUser' }]),
+      }),
+    };
+    mockDb.select = jest.fn()
+      .mockReturnValueOnce(historyChain)
+      .mockReturnValueOnce(connectorChain)
+      .mockReturnValueOnce(bindingChain);
+    mockDb.insert = jest.fn().mockReturnValue({ values: jest.fn().mockResolvedValue(undefined) });
+  }
 
   beforeEach(async () => {
     mockDb = {
@@ -48,7 +73,6 @@ describe('AgentService', () => {
         values: jest.fn().mockResolvedValue(undefined),
       }),
     };
-    mockRedis = { get: jest.fn(), set: jest.fn() };
     mockCrypto = { decrypt: jest.fn().mockReturnValue('cred') };
     mockRegistry = { get: jest.fn() };
     mockAudit = { log: jest.fn().mockResolvedValue(undefined) };
@@ -69,12 +93,12 @@ describe('AgentService', () => {
       filterByThreshold: jest.fn().mockImplementation((t) => t),
       toAITools: jest.fn().mockReturnValue({}),
     };
+    confirmationManager = new ConfirmationManager();
 
     const module = await Test.createTestingModule({
       providers: [
         AgentService,
         { provide: DB, useValue: mockDb },
-        { provide: REDIS, useValue: mockRedis },
         { provide: CryptoService, useValue: mockCrypto },
         { provide: ConnectorRegistry, useValue: mockRegistry },
         { provide: PermissionService, useValue: mockPermission },
@@ -82,7 +106,7 @@ describe('AgentService', () => {
         { provide: LLMConfigService, useValue: mockLLMConfig },
         { provide: PromptBuilderService, useValue: new PromptBuilderService() },
         { provide: ContextManagerService, useValue: new ContextManagerService() },
-        { provide: ConfirmationManager, useValue: new ConfirmationManager() },
+        { provide: ConfirmationManager, useValue: confirmationManager },
         { provide: ToolRegistryService, useValue: mockToolRegistry },
       ],
     }).compile();
@@ -92,22 +116,11 @@ describe('AgentService', () => {
 
   describe('processMessage', () => {
     it('should return text response when LLM returns text only', async () => {
-      (streamText as jest.Mock).mockResolvedValue({
-        text: Promise.resolve('你好！有什么可以帮你的？'),
-        steps: Promise.resolve([]),
+      (generateText as jest.Mock).mockResolvedValue({
+        text: '你好！有什么可以帮你的？',
+        steps: [],
       });
-
-      // Mock DB calls: loadHistory (with orderBy), getConnectorInfo, getBindingInfo, saveMessage
-      const historyChain = { from: jest.fn().mockReturnValue({ where: jest.fn().mockReturnValue({ orderBy: jest.fn().mockResolvedValue([]) }) }) };
-      const connectorChain = { from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([{ name: 'Demo ERP' }]) }) };
-      const bindingChain = { from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([{ saasUsername: 'TestUser' }]) }) };
-
-      mockDb.select = jest.fn()
-        .mockReturnValueOnce(historyChain)   // loadHistory
-        .mockReturnValueOnce(connectorChain) // getConnectorInfo
-        .mockReturnValueOnce(bindingChain);  // getBindingInfo
-
-      mockDb.insert = jest.fn().mockReturnValue({ values: jest.fn().mockResolvedValue(undefined) });
+      setupDbMocks();
 
       const result = await service.processMessage({
         userId: 'user-1',
@@ -120,8 +133,10 @@ describe('AgentService', () => {
       expect(result.content).toBe('你好！有什么可以帮你的？');
     });
 
-    it('should return error for LLM auth failure (401)', async () => {
-      mockLLMConfig.resolve.mockRejectedValue(new Error('401 Unauthorized'));
+    it('should return error for LLM auth failure (status 401)', async () => {
+      const err = new Error('Unauthorized');
+      (err as any).status = 401;
+      mockLLMConfig.resolve.mockRejectedValue(err);
 
       const result = await service.processMessage({
         userId: 'user-1',
@@ -134,8 +149,10 @@ describe('AgentService', () => {
       expect(result.error).toBe('llm_auth_error');
     });
 
-    it('should return error for LLM auth failure (403)', async () => {
-      mockLLMConfig.resolve.mockRejectedValue(new Error('403 Forbidden'));
+    it('should return error for LLM auth failure (status 403)', async () => {
+      const err = new Error('Forbidden');
+      (err as any).status = 403;
+      mockLLMConfig.resolve.mockRejectedValue(err);
 
       const result = await service.processMessage({
         userId: 'user-1',
@@ -166,26 +183,16 @@ describe('AgentService', () => {
         submit_leave: { description: 'Submit leave', parameters: {} },
       });
 
-      (streamText as jest.Mock).mockResolvedValue({
-        text: Promise.resolve('I will submit your leave request.'),
-        steps: Promise.resolve([{
+      (generateText as jest.Mock).mockResolvedValue({
+        text: 'I will submit your leave request.',
+        steps: [{
           toolCalls: [{
             toolName: 'submit_leave',
             args: { type: 'annual', start: '2026-06-01', end: '2026-06-03' },
           }],
-        }]),
+        }],
       });
-
-      const historyChain = { from: jest.fn().mockReturnValue({ where: jest.fn().mockReturnValue({ orderBy: jest.fn().mockResolvedValue([]) }) }) };
-      const connectorChain = { from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([{ name: 'Demo ERP' }]) }) };
-      const bindingChain = { from: jest.fn().mockReturnValue({ where: jest.fn().mockResolvedValue([{ saasUsername: 'TestUser' }]) }) };
-
-      mockDb.select = jest.fn()
-        .mockReturnValueOnce(historyChain)
-        .mockReturnValueOnce(connectorChain)
-        .mockReturnValueOnce(bindingChain);
-
-      mockDb.insert = jest.fn().mockReturnValue({ values: jest.fn().mockResolvedValue(undefined) });
+      setupDbMocks();
 
       const result = await service.processMessage({
         userId: 'user-1',
@@ -198,9 +205,89 @@ describe('AgentService', () => {
       expect(result.toolName).toBe('submit_leave');
       expect(result.riskLevel).toBe('write');
       expect(result.confirmationId).toBeDefined();
+      // Confirmation should be registered in the manager
+      expect(confirmationManager.has(result.confirmationId!)).toBe(true);
     });
 
-    it('should handle generic errors gracefully', async () => {
+    it('should execute read-risk tools directly without confirmation', async () => {
+      const toolDef = {
+        id: 'td-2',
+        name: 'list_orders',
+        description: 'List orders',
+        parametersJson: { type: 'object' },
+        requiredPermission: 'order:read',
+        riskLevel: 'read',
+        apiMappingJson: { method: 'GET', path: '/api/orders' },
+      };
+
+      mockToolRegistry.getToolsForConnector.mockResolvedValue([toolDef]);
+      mockPermission.filterTools.mockReturnValue([toolDef]);
+      mockToolRegistry.filterByThreshold.mockReturnValue([toolDef]);
+      mockToolRegistry.toAITools.mockReturnValue({
+        list_orders: { description: 'List orders', parameters: {} },
+      });
+
+      const mockConnector = {
+        executeToolCall: jest.fn().mockResolvedValue({ success: true, data: { orders: [] } }),
+      };
+      mockRegistry.get = jest.fn().mockReturnValue(mockConnector);
+
+      // Mock DB for executeToolCall binding lookup
+      const bindingSelectChain = {
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([{ encryptedCred: Buffer.from('enc') }]),
+        }),
+      };
+
+      (generateText as jest.Mock).mockResolvedValue({
+        text: 'Here are the orders.',
+        steps: [{
+          toolCalls: [{
+            toolName: 'list_orders',
+            args: { status: 'open' },
+          }],
+        }],
+      });
+
+      const historyChain = {
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            orderBy: jest.fn().mockResolvedValue([]),
+          }),
+        }),
+      };
+      const connectorChain = {
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([{ name: 'Demo ERP' }]),
+        }),
+      };
+      const bindingInfoChain = {
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([{ saasUsername: 'TestUser' }]),
+        }),
+      };
+
+      mockDb.select = jest.fn()
+        .mockReturnValueOnce(historyChain)
+        .mockReturnValueOnce(connectorChain)
+        .mockReturnValueOnce(bindingInfoChain)
+        .mockReturnValueOnce(bindingSelectChain); // for executeToolCall
+      mockDb.insert = jest.fn().mockReturnValue({ values: jest.fn().mockResolvedValue(undefined) });
+
+      const result = await service.processMessage({
+        userId: 'user-1',
+        conversationId: 'conv-1',
+        message: '查看订单',
+        connectorId: 'conn-1',
+      });
+
+      expect(mockConnector.executeToolCall).toHaveBeenCalledWith('list_orders', { status: 'open' }, 'cred');
+      expect(mockAudit.log).toHaveBeenCalled();
+      // After tool execution, continues to process and returns text
+      expect(result.type).toBe('text');
+    });
+
+    it('should return sanitized error for generic failures', async () => {
       mockLLMConfig.resolve.mockRejectedValue(new Error('Some unexpected error'));
 
       const result = await service.processMessage({
@@ -211,15 +298,44 @@ describe('AgentService', () => {
       });
 
       expect(result.type).toBe('error');
-      expect(result.error).toBe('Some unexpected error');
+      expect(result.error).toBe('Internal error. Please try again.');
+    });
+
+    it('should call permissionService.filterTools instead of inline filter', async () => {
+      (generateText as jest.Mock).mockResolvedValue({ text: 'ok', steps: [] });
+      setupDbMocks();
+
+      await service.processMessage({
+        userId: 'user-1',
+        conversationId: 'conv-1',
+        message: '你好',
+        connectorId: 'conn-1',
+      });
+
+      expect(mockPermission.filterTools).toHaveBeenCalled();
     });
   });
 
   describe('handleConfirmation', () => {
+    it('should reject unknown confirmation ID', async () => {
+      const result = await service.handleConfirmation('nonexistent', 'confirm', {
+        userId: 'user-1',
+        conversationId: 'conv-1',
+        connectorId: 'conn-1',
+        toolName: 'submit_leave',
+        toolArguments: { type: 'annual' },
+      });
+
+      expect(result.type).toBe('error');
+      expect(result.error).toContain('not found');
+    });
+
     it('should cancel operation when action is cancel', async () => {
+      const id = confirmationManager.createId();
+      confirmationManager.register(id);
       mockDb.insert = jest.fn().mockReturnValue({ values: jest.fn().mockResolvedValue(undefined) });
 
-      const result = await service.handleConfirmation('conf-1', 'cancel', {
+      const result = await service.handleConfirmation(id, 'cancel', {
         userId: 'user-1',
         conversationId: 'conv-1',
         connectorId: 'conn-1',
@@ -229,6 +345,47 @@ describe('AgentService', () => {
 
       expect(result.type).toBe('text');
       expect(result.content).toContain('取消');
+      expect(confirmationManager.has(id)).toBe(false);
+    });
+
+    it('should execute tool on confirm action', async () => {
+      const id = confirmationManager.createId();
+      confirmationManager.register(id);
+
+      const toolDef = {
+        id: 'td-1',
+        name: 'submit_leave',
+        description: 'Submit leave',
+        parametersJson: {},
+        requiredPermission: 'leave:submit',
+        riskLevel: 'write',
+        apiMappingJson: { method: 'POST', path: '/api/leaves' },
+      };
+      mockToolRegistry.getToolsForConnector.mockResolvedValue([toolDef]);
+
+      const mockConnector = {
+        executeToolCall: jest.fn().mockResolvedValue({ success: true, data: { id: 'leave-1' } }),
+      };
+      mockRegistry.get = jest.fn().mockReturnValue(mockConnector);
+
+      mockDb.select = jest.fn().mockReturnValue({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockResolvedValue([{ encryptedCred: Buffer.from('enc') }]),
+        }),
+      });
+      mockDb.insert = jest.fn().mockReturnValue({ values: jest.fn().mockResolvedValue(undefined) });
+
+      const result = await service.handleConfirmation(id, 'confirm', {
+        userId: 'user-1',
+        conversationId: 'conv-1',
+        connectorId: 'conn-1',
+        toolName: 'submit_leave',
+        toolArguments: { type: 'annual', start: '2026-06-01' },
+      });
+
+      expect(mockConnector.executeToolCall).toHaveBeenCalledWith('submit_leave', { type: 'annual', start: '2026-06-01' }, 'cred');
+      expect(result.type).toBe('text');
+      expect(result.content).toContain('执行成功');
     });
   });
 });

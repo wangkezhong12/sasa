@@ -65,6 +65,15 @@ describe('PermissionService', () => {
       const filtered = service.filterTools(tools.slice(0, 3), []);
       expect(filtered).toHaveLength(0);
     });
+
+    it('should exclude tools with null requiredPermission', () => {
+      const toolsWithNull = [
+        { name: 'x', requiredPermission: 'read:data' },
+        { name: 'y', requiredPermission: null as unknown as string },
+      ];
+      const filtered = service.filterTools(toolsWithNull, ['read:data']);
+      expect(filtered.map(t => t.name)).toEqual(['x']);
+    });
   });
 
   describe('getPermissions', () => {

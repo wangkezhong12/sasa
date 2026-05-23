@@ -1,6 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
-import { streamText, CoreMessage } from 'ai';
+import { generateText, CoreMessage } from 'ai';
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { DB } from '../../common/database/database.module';
@@ -54,10 +54,10 @@ export class AgentService {
       // 1. Load LLM config
       const llmConfig = await this.llmConfigService.resolve(params.userId, params.workspaceId);
 
-      // 2. Load and filter tools
+      // 2. Load and filter tools by permissions
       const allTools = await this.toolRegistry.getToolsForConnector(params.connectorId);
       const permissions = await this.permissionService.getPermissions(params.userId, params.connectorId);
-      const filteredTools = allTools.filter((t) => t.requiredPermission && permissions.includes(t.requiredPermission));
+      const filteredTools = this.permissionService.filterTools(allTools, permissions);
       const thresholdedTools = this.toolRegistry.filterByThreshold(filteredTools);
       const aiTools = this.toolRegistry.toAITools(thresholdedTools);
 
@@ -76,7 +76,7 @@ export class AgentService {
       // 4. Save user message
       await this.saveMessage(params.conversationId, 'user', params.message);
 
-      // 5. Add user message to context
+      // 5. Build messages array
       const messagesWithContext: CoreMessage[] = [
         ...trimmed.map((m) => ({
           role: m.role as 'user' | 'assistant',
@@ -85,9 +85,9 @@ export class AgentService {
         { role: 'user' as const, content: params.message },
       ];
 
-      // 6. Call LLM
+      // 6. Call LLM with generateText (synchronous — streaming will be added in chunk-7 Chat Gateway)
       const model = this.loadModel(llmConfig);
-      const result = await streamText({
+      const result = await generateText({
         model: model as any,
         system: systemPrompt,
         messages: messagesWithContext,
@@ -95,49 +95,50 @@ export class AgentService {
         maxSteps: MAX_TOOL_CALL_STEPS,
       });
 
-      // 7. Process result
-      const responseText = await result.text;
-      const steps = await result.steps;
+      const responseText = result.text;
+      const steps = result.steps;
 
-      if (steps && steps.length > 0) {
-        for (const step of steps) {
-          if (step.toolCalls && step.toolCalls.length > 0) {
-            for (const toolCall of step.toolCalls) {
-              // Find the tool definition for risk level
-              const toolDef = thresholdedTools.find((t) => t.name === toolCall.toolName);
-              const riskLevel = toolDef?.riskLevel || 'write';
+      // 7. Process tool calls from steps
+      // Execute all read-risk tools immediately.
+      // For the first high-risk tool, create a confirmation and return.
+      for (const step of steps) {
+        for (const toolCall of step.toolCalls) {
+          const toolDef = thresholdedTools.find((t) => t.name === toolCall.toolName);
+          const riskLevel = toolDef?.riskLevel || 'write';
 
-              // For high-risk operations, require confirmation
-              if (riskLevel === 'write' || riskLevel === 'delete') {
-                const confirmationId = `confirm-${params.conversationId}-${Date.now()}`;
+          if (riskLevel === 'write' || riskLevel === 'delete') {
+            // High-risk: create confirmation, return to client
+            const confirmationId = await this.confirmationManager.createId();
+            this.confirmationManager.register(confirmationId);
 
-                // Save assistant message with tool call info
-                await this.saveMessage(params.conversationId, 'assistant', responseText || null);
+            await this.saveMessage(
+              params.conversationId,
+              'assistant',
+              `请求执行工具: ${toolCall.toolName}，等待用户确认。`,
+            );
 
-                return {
-                  type: 'confirmation_required',
-                  toolName: toolCall.toolName,
-                  toolArguments: toolCall.args as Record<string, unknown>,
-                  confirmationId,
-                  riskLevel,
-                };
-              }
-
-              // Execute low-risk tool directly
-              await this.executeToolCall(
-                params.userId,
-                params.conversationId,
-                params.connectorId,
-                toolCall.toolName,
-                toolCall.args as Record<string, unknown>,
-                toolDef,
-              );
-            }
+            return {
+              type: 'confirmation_required',
+              toolName: toolCall.toolName,
+              toolArguments: toolCall.args as Record<string, unknown>,
+              confirmationId,
+              riskLevel,
+            };
           }
+
+          // Low-risk: execute directly
+          await this.executeToolCall(
+            params.userId,
+            params.conversationId,
+            params.connectorId,
+            toolCall.toolName,
+            toolCall.args as Record<string, unknown>,
+            toolDef,
+          );
         }
       }
 
-      // Save assistant response
+      // 8. No high-risk tool calls — save and return LLM text
       await this.saveMessage(params.conversationId, 'assistant', responseText);
 
       return {
@@ -145,14 +146,7 @@ export class AgentService {
         content: responseText,
       };
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-
-      // Handle LLM auth errors specifically
-      if (errorMessage.includes('401') || errorMessage.includes('403')) {
-        return { type: 'error', error: 'llm_auth_error' };
-      }
-
-      return { type: 'error', error: errorMessage };
+      return this.handleError(err);
     }
   }
 
@@ -168,9 +162,9 @@ export class AgentService {
       modifiedParameters?: Record<string, unknown>;
     },
   ): Promise<AgentResponse> {
-    const finalParams = action === 'modify' && params.modifiedParameters
-      ? params.modifiedParameters
-      : params.toolArguments;
+    if (!this.confirmationManager.has(confirmationId)) {
+      return { type: 'error', error: 'Confirmation not found or expired' };
+    }
 
     if (action === 'cancel') {
       this.confirmationManager.cancel(confirmationId);
@@ -178,17 +172,21 @@ export class AgentService {
       return { type: 'text', content: '操作已取消。' };
     }
 
-    // Resolve the confirmation promise
+    // Resolve the pending confirmation
     this.confirmationManager.resolve(confirmationId, {
       action,
       modifiedParameters: action === 'modify' ? params.modifiedParameters : undefined,
     });
 
+    const finalParams = action === 'modify' && params.modifiedParameters
+      ? params.modifiedParameters
+      : params.toolArguments;
+
     // Execute the tool
     const toolDefs = await this.toolRegistry.getToolsForConnector(params.connectorId);
     const toolDef = toolDefs.find((t) => t.name === params.toolName);
 
-    const result = await this.executeToolCall(
+    return this.executeToolCall(
       params.userId,
       params.conversationId,
       params.connectorId,
@@ -196,8 +194,6 @@ export class AgentService {
       finalParams,
       toolDef,
     );
-
-    return result;
   }
 
   private async executeToolCall(
@@ -221,7 +217,7 @@ export class AgentService {
       const cred = this.crypto.decrypt(binding.encryptedCred);
       const toolResult = await connector.executeToolCall(toolName, args, cred);
 
-      // Audit log
+      // Audit log — redact known sensitive parameter names
       await this.auditService.log({
         userId,
         conversationId,
@@ -229,9 +225,9 @@ export class AgentService {
         saasEndpoint: toolDef?.apiMappingJson
           ? `${(toolDef.apiMappingJson as any).method} ${(toolDef.apiMappingJson as any).path}`
           : toolName,
-        requestJson: args,
+        requestJson: this.sanitizeArgs(args),
         responseStatus: toolResult.success ? 200 : 500,
-        responseJson: toolResult.data || toolResult.error,
+        responseJson: toolResult.success ? toolResult.data : undefined,
       });
 
       const responseText = toolResult.success
@@ -246,9 +242,31 @@ export class AgentService {
         error: toolResult.success ? undefined : responseText,
       };
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      return { type: 'error', error: `Tool execution failed: ${errorMessage}` };
+      const msg = err instanceof Error ? err.message : String(err);
+      return { type: 'error', error: `Tool execution failed: ${msg}` };
     }
+  }
+
+  private handleError(err: unknown): AgentResponse {
+    if (err && typeof err === 'object') {
+      const status = (err as any).status || (err as any).statusCode;
+      if (status === 401 || status === 403) {
+        return { type: 'error', error: 'llm_auth_error' };
+      }
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    return { type: 'error', error: 'Internal error. Please try again.' };
+  }
+
+  private sanitizeArgs(args: Record<string, unknown>): Record<string, unknown> {
+    const sensitiveKeys = ['password', 'token', 'secret', 'apiKey', 'api_key', 'credential', 'auth'];
+    const sanitized = { ...args };
+    for (const key of Object.keys(sanitized)) {
+      if (sensitiveKeys.some((s) => key.toLowerCase().includes(s))) {
+        sanitized[key] = '[REDACTED]';
+      }
+    }
+    return sanitized;
   }
 
   private async loadHistory(conversationId: string): Promise<{ role: string; content: string | null }[]> {
@@ -279,25 +297,23 @@ export class AgentService {
   private loadModel(config: ResolvedLLMConfig) {
     switch (config.providerId) {
       case 'openai': {
-        const openai = createOpenAI({
-          apiKey: config.apiKey,
-          baseURL: config.baseUrl || undefined,
-        });
+        const openai = createOpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl || undefined });
         return openai(config.modelId);
       }
       case 'anthropic': {
-        const anthropic = createAnthropic({
-          apiKey: config.apiKey,
-          baseURL: config.baseUrl || undefined,
-        });
+        const anthropic = createAnthropic({ apiKey: config.apiKey, baseURL: config.baseUrl || undefined });
         return anthropic(config.modelId);
       }
+      case 'deepseek': {
+        const provider = createOpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl || 'https://api.deepseek.com' });
+        return provider(config.modelId);
+      }
       default: {
-        // For deepseek and custom, use OpenAI-compatible API
-        const provider = createOpenAI({
-          apiKey: config.apiKey,
-          baseURL: config.baseUrl || 'https://api.deepseek.com',
-        });
+        // custom provider — baseUrl is required
+        if (!config.baseUrl) {
+          throw new Error('Custom LLM provider requires a base URL');
+        }
+        const provider = createOpenAI({ apiKey: config.apiKey, baseURL: config.baseUrl });
         return provider(config.modelId);
       }
     }
