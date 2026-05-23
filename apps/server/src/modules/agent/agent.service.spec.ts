@@ -332,7 +332,7 @@ describe('AgentService', () => {
 
     it('should cancel operation when action is cancel', async () => {
       const id = confirmationManager.createId();
-      confirmationManager.register(id);
+      confirmationManager.register(id, 'user-1');
       mockDb.insert = jest.fn().mockReturnValue({ values: jest.fn().mockResolvedValue(undefined) });
 
       const result = await service.handleConfirmation(id, 'cancel', {
@@ -350,7 +350,7 @@ describe('AgentService', () => {
 
     it('should execute tool on confirm action', async () => {
       const id = confirmationManager.createId();
-      confirmationManager.register(id);
+      confirmationManager.register(id, 'user-1');
 
       const toolDef = {
         id: 'td-1',
@@ -386,6 +386,22 @@ describe('AgentService', () => {
       expect(mockConnector.executeToolCall).toHaveBeenCalledWith('submit_leave', { type: 'annual', start: '2026-06-01' }, 'cred');
       expect(result.type).toBe('text');
       expect(result.content).toContain('执行成功');
+    });
+
+    it('should reject confirmation from wrong user', async () => {
+      const id = confirmationManager.createId();
+      confirmationManager.register(id, 'user-1');
+
+      const result = await service.handleConfirmation(id, 'confirm', {
+        userId: 'user-2',
+        conversationId: 'conv-1',
+        connectorId: 'conn-1',
+        toolName: 'submit_leave',
+        toolArguments: { type: 'annual' },
+      });
+
+      expect(result.type).toBe('error');
+      expect(result.error).toContain('does not belong');
     });
   });
 });

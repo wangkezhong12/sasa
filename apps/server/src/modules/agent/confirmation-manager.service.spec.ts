@@ -13,21 +13,21 @@ describe('ConfirmationManager', () => {
   });
 
   it('should create pending confirmation and resolve on confirm', async () => {
-    const promise = manager.create('conf-1', 5000);
+    const promise = manager.create('conf-1', 'user-1', 5000);
     manager.resolve('conf-1', { action: 'confirm' });
     const result = await promise;
     expect(result.action).toBe('confirm');
   });
 
   it('should auto-cancel on timeout', async () => {
-    const promise = manager.create('conf-2', 100);
+    const promise = manager.create('conf-2', 'user-1', 100);
     jest.advanceTimersByTime(150);
     const result = await promise;
     expect(result.action).toBe('cancel');
   });
 
   it('should handle modify action with new parameters', async () => {
-    const promise = manager.create('conf-3', 5000);
+    const promise = manager.create('conf-3', 'user-1', 5000);
     manager.resolve('conf-3', {
       action: 'modify',
       modifiedParameters: { date: '2026-06-01' },
@@ -42,31 +42,38 @@ describe('ConfirmationManager', () => {
   });
 
   it('should handle cancel method', async () => {
-    const promise = manager.create('conf-4', 5000);
+    const promise = manager.create('conf-4', 'user-1', 5000);
     manager.cancel('conf-4');
     const result = await promise;
     expect(result.action).toBe('cancel');
   });
 
   it('should report pending status via has()', () => {
-    manager.create('conf-5', 5000);
+    manager.create('conf-5', 'user-1', 5000);
     expect(manager.has('conf-5')).toBe(true);
     expect(manager.has('nonexistent')).toBe(false);
   });
 
   it('should remove from pending after resolve', () => {
-    manager.create('conf-6', 5000);
+    manager.create('conf-6', 'user-1', 5000);
     manager.resolve('conf-6', { action: 'confirm' });
     expect(manager.has('conf-6')).toBe(false);
   });
 
   it('should handle multiple sequential confirmations', async () => {
-    const p1 = manager.create('conf-a', 5000);
-    const p2 = manager.create('conf-b', 5000);
+    const p1 = manager.create('conf-a', 'user-1', 5000);
+    const p2 = manager.create('conf-b', 'user-1', 5000);
     manager.resolve('conf-a', { action: 'confirm' });
     manager.resolve('conf-b', { action: 'cancel' });
     const [r1, r2] = await Promise.all([p1, p2]);
     expect(r1.action).toBe('confirm');
     expect(r2.action).toBe('cancel');
+  });
+
+  it('should verify ownership of confirmation', () => {
+    manager.register('conf-own', 'user-1');
+    expect(manager.verifyOwnership('conf-own', 'user-1')).toBe(true);
+    expect(manager.verifyOwnership('conf-own', 'user-2')).toBe(false);
+    expect(manager.verifyOwnership('nonexistent', 'user-1')).toBe(false);
   });
 });

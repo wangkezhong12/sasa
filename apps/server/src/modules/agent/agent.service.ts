@@ -108,8 +108,8 @@ export class AgentService {
 
           if (riskLevel === 'write' || riskLevel === 'delete') {
             // High-risk: create confirmation, return to client
-            const confirmationId = await this.confirmationManager.createId();
-            this.confirmationManager.register(confirmationId);
+            const confirmationId = this.confirmationManager.createId();
+            this.confirmationManager.register(confirmationId, params.userId);
 
             await this.saveMessage(
               params.conversationId,
@@ -164,6 +164,10 @@ export class AgentService {
   ): Promise<AgentResponse> {
     if (!this.confirmationManager.has(confirmationId)) {
       return { type: 'error', error: 'Confirmation not found or expired' };
+    }
+
+    if (!this.confirmationManager.verifyOwnership(confirmationId, params.userId)) {
+      return { type: 'error', error: 'Confirmation does not belong to this user' };
     }
 
     if (action === 'cancel') {
