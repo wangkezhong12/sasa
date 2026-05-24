@@ -20,16 +20,16 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'cd apps/server && pnpm dev',
+      command: 'cd apps/server && NODE_OPTIONS="--require dotenv/config" DOTENV_CONFIG_PATH=.env.test pnpm dev',
       port: 4000,
       reuseExistingServer: !process.env.CI,
-      timeout: 15000,
+      timeout: 20000,
     },
     {
       command: 'cd apps/web && pnpm dev',
       port: 3000,
       reuseExistingServer: !process.env.CI,
-      timeout: 15000,
+      timeout: 20000,
     },
   ],
 });

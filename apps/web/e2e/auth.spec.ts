@@ -45,7 +45,8 @@ test.describe('Auth Flow', () => {
 
     // Should redirect to chat
     await expect(page).toHaveURL(/\/chat/);
-    await expect(page.getByText('Sasa')).toBeVisible();
+    // Check sidebar is rendered
+    await expect(page.locator('aside').getByText('Sasa', { exact: true })).toBeVisible();
   });
 
   test('should show error on wrong password', async ({ page }) => {
