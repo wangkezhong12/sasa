@@ -1,4 +1,5 @@
-import postgres from 'postgres';
+/* eslint-disable @typescript-eslint/no-require-imports */
+const postgres = require('postgres');
 
 const TABLES = [
   'audit_logs',

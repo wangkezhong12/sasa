@@ -1,5 +1,5 @@
 import {
-  pgTable,
+  pgSchema,
   uuid,
   varchar,
   text,
@@ -12,6 +12,8 @@ import {
 } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
+const sasa = pgSchema('sasa');
+
 // Custom type for BYTEA columns that work with Buffer in JS
 const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType() {
@@ -21,7 +23,7 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 
 // ─── Users ───────────────────────────────────────────────
 
-export const users = pgTable('users', {
+export const users = sasa.table('users', {
   id: uuid('id').primaryKey().defaultRandom(),
   email: varchar('email', { length: 255 }).notNull().unique(),
   name: varchar('name', { length: 100 }).notNull(),
@@ -34,7 +36,7 @@ export const users = pgTable('users', {
 
 // ─── Workspaces ──────────────────────────────────────────
 
-export const workspaces = pgTable('workspaces', {
+export const workspaces = sasa.table('workspaces', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: varchar('name', { length: 100 }).notNull(),
   slug: varchar('slug', { length: 50 }).notNull().unique(),
@@ -43,7 +45,7 @@ export const workspaces = pgTable('workspaces', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
-export const workspaceMembers = pgTable('workspace_members', {
+export const workspaceMembers = sasa.table('workspace_members', {
   id: uuid('id').primaryKey().defaultRandom(),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id),
   userId: uuid('user_id').notNull().references(() => users.id),
@@ -59,7 +61,7 @@ export const workspaceMembersRelations = relations(workspaceMembers, ({ one }) =
 // ─── SaaS Connectors ─────────────────────────────────────
 // workspaceId is nullable: NULL means builtin connector (not workspace-scoped)
 
-export const saasConnectors = pgTable('saas_connectors', {
+export const saasConnectors = sasa.table('saas_connectors', {
   id: uuid('id').primaryKey().defaultRandom(),
   workspaceId: uuid('workspace_id'),
   name: varchar('name', { length: 100 }).notNull(),
@@ -75,7 +77,7 @@ export const saasConnectors = pgTable('saas_connectors', {
 
 // ─── SaaS Bindings ───────────────────────────────────────
 
-export const saasBindings = pgTable('saas_bindings', {
+export const saasBindings = sasa.table('saas_bindings', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id),
   connectorId: uuid('connector_id').notNull().references(() => saasConnectors.id),
@@ -92,7 +94,7 @@ export const saasBindings = pgTable('saas_bindings', {
 // ─── Conversations ───────────────────────────────────────
 // workspaceId/connectorId are nullable: personal chats may not have workspace context
 
-export const conversations = pgTable('conversations', {
+export const conversations = sasa.table('conversations', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id),
   workspaceId: uuid('workspace_id'),
@@ -106,7 +108,7 @@ export const conversations = pgTable('conversations', {
 
 // ─── Messages ────────────────────────────────────────────
 
-export const messages = pgTable('messages', {
+export const messages = sasa.table('messages', {
   id: uuid('id').primaryKey().defaultRandom(),
   conversationId: uuid('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
   role: varchar('role', { length: 20 }).notNull(),
@@ -120,7 +122,7 @@ export const messages = pgTable('messages', {
 
 // ─── Tool Definitions ────────────────────────────────────
 
-export const toolDefinitions = pgTable('tool_definitions', {
+export const toolDefinitions = sasa.table('tool_definitions', {
   id: uuid('id').primaryKey().defaultRandom(),
   connectorId: uuid('connector_id').notNull().references(() => saasConnectors.id, { onDelete: 'cascade' }),
   name: varchar('name', { length: 100 }).notNull(),
@@ -135,7 +137,7 @@ export const toolDefinitions = pgTable('tool_definitions', {
 // ─── Audit Logs ──────────────────────────────────────────
 // Append-only: no UPDATE/DELETE at application or DB level
 
-export const auditLogs = pgTable('audit_logs', {
+export const auditLogs = sasa.table('audit_logs', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').notNull().references(() => users.id),
   conversationId: uuid('conversation_id'),
@@ -149,7 +151,7 @@ export const auditLogs = pgTable('audit_logs', {
 
 // ─── LLM Configs ─────────────────────────────────────────
 
-export const llmConfigs = pgTable('llm_configs', {
+export const llmConfigs = sasa.table('llm_configs', {
   id: uuid('id').primaryKey().defaultRandom(),
   scope: varchar('scope', { length: 20 }).notNull(),
   scopeId: uuid('scope_id').notNull(),
@@ -163,7 +165,7 @@ export const llmConfigs = pgTable('llm_configs', {
 
 // ─── System Configs ──────────────────────────────────────
 
-export const systemConfigs = pgTable('system_configs', {
+export const systemConfigs = sasa.table('system_configs', {
   id: uuid('id').primaryKey().defaultRandom(),
   scope: varchar('scope', { length: 20 }).notNull(),
   scopeId: uuid('scope_id').notNull(),

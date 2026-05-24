@@ -3,6 +3,8 @@
   "rootDir": ".",
   "testEnvironment": "node",
   "testRegex": ".e2e-spec.ts$",
-  "transform": { "^.+\\.ts$": "ts-jest" },
-  "setupFilesAfterFramework": ["./setup.ts"]
+  "transform": {
+    "^.+\\.ts$": ["ts-jest", { "esModuleInterop": true }]
+  },
+  "setupFiles": ["./setup.ts"]
 }
