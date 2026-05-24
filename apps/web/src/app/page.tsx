@@ -1,7 +1,8 @@
-export default function Home() {
-  return (
-    <main className="flex min-h-screen items-center justify-center">
-      <h1 className="text-2xl font-bold">Sasa</h1>
-    </main>
-  );
+import { redirect } from 'next/navigation';
+
+export const dynamic = 'force-dynamic';
+
+export default async function Home() {
+  // Simple redirect — auth check happens at destination
+  redirect('/chat');
 }
