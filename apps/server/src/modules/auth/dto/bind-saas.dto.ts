@@ -1,14 +1,15 @@
-import { IsString, IsIn, IsOptional } from 'class-validator';
+import { IsString, IsIn, IsOptional, IsObject } from 'class-validator';
+import type { AuthType } from '@sasa/shared';
 
 export class BindSaasDto {
   @IsString()
   connectorId: string;
 
-  @IsIn(['oauth2', 'api_key'])
-  authType: 'oauth2' | 'api_key';
+  @IsIn(['api_key', 'app_secret', 'basic_auth', 'oauth2_code'])
+  authType: AuthType;
 
-  @IsString()
-  credential: string;
+  @IsObject()
+  credential: Record<string, string>;
 
   @IsOptional()
   @IsString()
