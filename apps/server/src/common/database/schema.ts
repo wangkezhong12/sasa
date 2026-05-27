@@ -86,7 +86,6 @@ export const saasBindings = pgTable('saas_bindings', {
   permissionsJson: jsonb('permissions_json').default([]),
   status: varchar('status', { length: 20 }).notNull().default('active'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  expiresAt: timestamp('expires_at', { withTimezone: true }),
 }, (table) => [unique().on(table.userId, table.connectorId)]);
 
 // ─── Conversations ───────────────────────────────────────

@@ -46,7 +46,6 @@ export class SaaSBindingService {
       saasUsername: saasBindings.saasUsername,
       status: saasBindings.status,
       createdAt: saasBindings.createdAt,
-      expiresAt: saasBindings.expiresAt,
     }).from(saasBindings).where(eq(saasBindings.userId, userId));
     return rows;
   }
