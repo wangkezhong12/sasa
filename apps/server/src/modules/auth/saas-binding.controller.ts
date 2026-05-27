@@ -60,7 +60,15 @@ export class SaaSBindingController {
       600,
     );
 
-    const authorizeUrl = `${config.params.authorizeUrl}?response_type=code&client_id=${config.params.clientId}&redirect_uri=${this.buildCallbackUrl()}&state=${state}&scope=${config.params.scopes || ''}`;
+    const url = new URL(config.params.authorizeUrl);
+    url.searchParams.set('response_type', 'code');
+    url.searchParams.set('client_id', config.params.clientId);
+    url.searchParams.set('redirect_uri', this.buildCallbackUrl());
+    url.searchParams.set('state', state);
+    if (config.params.scopes) {
+      url.searchParams.set('scope', config.params.scopes);
+    }
+    const authorizeUrl = url.toString();
 
     return { authorizeUrl, state };
   }

@@ -7,6 +7,7 @@ import { AuthStrategyResolver } from './auth-strategy.resolver';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { ConnectorRegistry } from '../connector/connector-registry.service';
 import { REDIS } from '../../common/redis/redis.module';
+import { DB } from '../../common/database/database.module';
 import { saasBindings } from '../../common/database/schema';
 
 const REFRESH_LOCK_TTL_MS = 10000; // 10 seconds
@@ -14,7 +15,7 @@ const REFRESH_LOCK_TTL_MS = 10000; // 10 seconds
 @Injectable()
 export class CredentialManager {
   constructor(
-    @Inject('DATABASE') private readonly db: any,
+    @Inject(DB) private readonly db: any,
     @Inject(REDIS) private readonly redis: Redis,
     private readonly crypto: CryptoService,
     private readonly strategyResolver: AuthStrategyResolver,

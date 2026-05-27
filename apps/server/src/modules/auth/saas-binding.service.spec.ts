@@ -17,6 +17,12 @@ describe('SaaSBindingService', () => {
     mockDb = {
       insert: jest.fn().mockReturnValue({
         values: jest.fn().mockReturnValue({
+          onConflictDoUpdate: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([{
+              id: 'binding-1', userId: 'user-1', connectorId: 'conn-1',
+              authType: 'api_key', status: 'active', createdAt: new Date(),
+            }]),
+          }),
           returning: jest.fn().mockResolvedValue([{
             id: 'binding-1', userId: 'user-1', connectorId: 'conn-1',
             authType: 'api_key', status: 'active', createdAt: new Date(),

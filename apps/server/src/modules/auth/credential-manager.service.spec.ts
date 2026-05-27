@@ -1,4 +1,5 @@
 import { Test } from '@nestjs/testing';
+import { DB } from '../../common/database/database.module';
 import { NotFoundException, ForbiddenException } from '@nestjs/common';
 import { CredentialManager } from './credential-manager.service';
 import { AuthStrategyResolver } from './auth-strategy.resolver';
@@ -28,7 +29,7 @@ describe('CredentialManager', () => {
     const module = await Test.createTestingModule({
       providers: [
         CredentialManager,
-        { provide: 'DATABASE', useValue: mockDb },
+        { provide: DB, useValue: mockDb },
         { provide: REDIS, useValue: mockRedis },
         {
           provide: CryptoService,

@@ -43,6 +43,9 @@ export class SaaSBindingService {
       encryptedCred,
       saasUserId: input.saasUserId,
       saasUsername: input.saasUsername,
+    }).onConflictDoUpdate({
+      target: [saasBindings.userId, saasBindings.connectorId],
+      set: { authType: input.authType, encryptedCred, status: 'active' },
     }).returning();
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { encryptedCred: _, ...safe } = binding;
@@ -60,6 +63,9 @@ export class SaaSBindingService {
       connectorId,
       authType,
       encryptedCred,
+    }).onConflictDoUpdate({
+      target: [saasBindings.userId, saasBindings.connectorId],
+      set: { authType, encryptedCred, status: 'active' },
     }).returning();
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { encryptedCred: _, ...safe } = binding;
