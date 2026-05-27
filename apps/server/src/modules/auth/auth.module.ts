@@ -6,8 +6,9 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { WorkspaceController } from './workspace.controller';
 import { WorkspaceService } from './workspace.service';
-import { SaaSBindingController } from './saas-binding.controller';
+import { SaaSBindingController, ConnectorController } from './saas-binding.controller';
 import { SaaSBindingService } from './saas-binding.service';
+import { OAuth2CallbackController } from './oauth2-callback.controller';
 import { AuthStrategyResolver } from './auth-strategy.resolver';
 import { CredentialManager } from './credential-manager.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
@@ -24,7 +25,7 @@ const jwtSecret = process.env.NEXTAUTH_SECRET || 'dev-secret';
     }),
     forwardRef(() => ConnectorModule),
   ],
-  controllers: [AuthController, WorkspaceController, SaaSBindingController],
+  controllers: [AuthController, WorkspaceController, SaaSBindingController, ConnectorController, OAuth2CallbackController],
   providers: [
     AuthService, JwtStrategy, WorkspaceService, SaaSBindingService,
     AuthStrategyResolver, CredentialManager, CryptoService,
