@@ -1,15 +1,16 @@
+import type { AuthType, AuthStrategyConfig } from './auth';
+
 export interface SaaSConnector {
   name: string;
   version: string;
   protocol: 'rest' | 'mcp' | 'cli';
-  supportedAuthTypes: ('oauth2' | 'api_key')[];
-  validateCredentials(credentials: string): Promise<boolean>;
+  supportedAuthTypes: AuthType[];
+  getAuthStrategyConfig(authType: AuthType): AuthStrategyConfig | undefined;
   getToolDefinitions(): ConnectorToolDefinition[];
-  fetchPermissions(credentials: string): Promise<string[]>;
   executeToolCall(
     toolName: string,
     parameters: Record<string, unknown>,
-    credentials: string,
+    authHeaders: Record<string, string>,
   ): Promise<ToolResult>;
 }
 

@@ -3,11 +3,14 @@ import { eq, and } from 'drizzle-orm';
 import { DB } from '../../common/database/database.module';
 import { saasBindings } from '../../common/database/schema';
 import { CryptoService } from '../../common/crypto/crypto.service';
+import { AuthStrategyResolver } from './auth-strategy.resolver';
+import { ConnectorRegistry } from '../connector/connector-registry.service';
+import type { AuthType, CredentialPayload } from '@sasa/shared';
 
 export interface BindSaasInput {
   connectorId: string;
-  authType: 'oauth2' | 'api_key';
-  credential: string;
+  authType: AuthType;
+  credential: Record<string, string>;
   saasUserId?: string;
   saasUsername?: string;
 }
@@ -17,12 +20,22 @@ export class SaaSBindingService {
   constructor(
     @Inject(DB) private db: any,
     private cryptoService: CryptoService,
+    private strategyResolver: AuthStrategyResolver,
+    private connectorRegistry: ConnectorRegistry,
   ) {}
 
-  // TODO(chunk-4): validate credentials via ConnectorRegistry before storing
-  // TODO(chunk-4): sync permissions via connector.fetchPermissions()
   async bind(userId: string, input: BindSaasInput) {
-    const encryptedCred = this.cryptoService.encrypt(input.credential);
+    // 1. Resolve connector and strategy
+    const connector = this.connectorRegistry.get(input.connectorId);
+    const strategy = this.strategyResolver.resolve(input.authType);
+    const config = connector.getAuthStrategyConfig(input.authType);
+
+    // 2. Strategy validates credentials + builds payload
+    const payload: CredentialPayload = await strategy.validateAndBuild(input.credential, config!);
+
+    // 3. Encrypt and store
+    const encryptedCred = this.cryptoService.encrypt(JSON.stringify(payload));
+
     const [binding] = await this.db.insert(saasBindings).values({
       userId,
       connectorId: input.connectorId,
@@ -30,6 +43,29 @@ export class SaaSBindingService {
       encryptedCred,
       saasUserId: input.saasUserId,
       saasUsername: input.saasUsername,
+    }).onConflictDoUpdate({
+      target: [saasBindings.userId, saasBindings.connectorId],
+      set: { authType: input.authType, encryptedCred, status: 'active' },
+    }).returning();
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { encryptedCred: _, ...safe } = binding;
+    return safe;
+  }
+
+  async bindWithPayload(
+    userId: string,
+    connectorId: string,
+    authType: AuthType,
+    encryptedCred: Buffer,
+  ) {
+    const [binding] = await this.db.insert(saasBindings).values({
+      userId,
+      connectorId,
+      authType,
+      encryptedCred,
+    }).onConflictDoUpdate({
+      target: [saasBindings.userId, saasBindings.connectorId],
+      set: { authType, encryptedCred, status: 'active' },
     }).returning();
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { encryptedCred: _, ...safe } = binding;
@@ -46,7 +82,6 @@ export class SaaSBindingService {
       saasUsername: saasBindings.saasUsername,
       status: saasBindings.status,
       createdAt: saasBindings.createdAt,
-      expiresAt: saasBindings.expiresAt,
     }).from(saasBindings).where(eq(saasBindings.userId, userId));
     return rows;
   }

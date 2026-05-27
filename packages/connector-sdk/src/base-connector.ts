@@ -1,20 +1,19 @@
-import type { SaaSConnector, ConnectorToolDefinition, ToolResult } from '@sasa/shared';
+import type { SaaSConnector, ConnectorToolDefinition, ToolResult, AuthType, AuthStrategyConfig } from '@sasa/shared';
 
 export abstract class BaseRestConnector implements SaaSConnector {
   abstract name: string;
   abstract version: string;
-  abstract supportedAuthTypes: ('oauth2' | 'api_key')[];
+  abstract supportedAuthTypes: AuthType[];
   protocol = 'rest' as const;
 
   abstract getBaseUrl(): string;
   abstract getToolDefinitions(): ConnectorToolDefinition[];
-  abstract fetchPermissions(credentials: string): Promise<string[]>;
-  abstract validateCredentials(credentials: string): Promise<boolean>;
+  abstract getAuthStrategyConfig(authType: AuthType): AuthStrategyConfig | undefined;
 
   async executeToolCall(
     toolName: string,
     parameters: Record<string, unknown>,
-    credentials: string,
+    authHeaders: Record<string, string>,
   ): Promise<ToolResult> {
     const toolDef = this.getToolDefinitions().find((t) => t.name === toolName);
     if (!toolDef) {
@@ -27,7 +26,7 @@ export abstract class BaseRestConnector implements SaaSConnector {
         method: toolDef.apiMapping.method,
         headers: {
           'Content-Type': 'application/json',
-          ...this.buildAuthHeaders(credentials),
+          ...authHeaders,
           ...this.buildMappedHeaders(toolDef.apiMapping.headerMapping, parameters),
         },
         body: toolDef.apiMapping.method !== 'GET' ? JSON.stringify(this.buildBody(toolDef, parameters)) : undefined,
@@ -47,10 +46,6 @@ export abstract class BaseRestConnector implements SaaSConnector {
 
   private resolvePath(path: string, params: Record<string, unknown>): string {
     return path.replace(/\{(\w+)\}/g, (_, key) => String(params[key] ?? ''));
-  }
-
-  private buildAuthHeaders(credentials: string): Record<string, string> {
-    return { Authorization: `Bearer ${credentials}` };
   }
 
   private buildMappedHeaders(mapping: Record<string, string> | undefined, params: Record<string, unknown>): Record<string, string> {

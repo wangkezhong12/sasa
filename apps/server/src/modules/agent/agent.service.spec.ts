@@ -1,10 +1,10 @@
 import { Test } from '@nestjs/testing';
 import { AgentService } from './agent.service';
 import { DB } from '../../common/database/database.module';
-import { CryptoService } from '../../common/crypto/crypto.service';
 import { ConnectorRegistry } from '../connector/connector-registry.service';
 import { PermissionService } from '../permission/permission.service';
 import { AuditService } from '../permission/audit.service';
+import { CredentialManager } from '../auth/credential-manager.service';
 import { LLMConfigService } from './llm-config.service';
 import { PromptBuilderService } from './prompt-builder.service';
 import { ContextManagerService } from './context-manager.service';
@@ -28,12 +28,12 @@ describe('AgentService', () => {
   let service: AgentService;
   let confirmationManager: ConfirmationManager;
   let mockDb: any;
-  let mockCrypto: any;
   let mockRegistry: any;
   let mockPermission: any;
   let mockAudit: any;
   let mockLLMConfig: any;
   let mockToolRegistry: any;
+  let mockCredentialManager: any;
 
   // Helper to set up DB mocks for processMessage
   function setupDbMocks() {
@@ -73,12 +73,14 @@ describe('AgentService', () => {
         values: jest.fn().mockResolvedValue(undefined),
       }),
     };
-    mockCrypto = { decrypt: jest.fn().mockReturnValue('cred') };
     mockRegistry = { get: jest.fn() };
     mockAudit = { log: jest.fn().mockResolvedValue(undefined) };
     mockPermission = {
       getPermissions: jest.fn().mockResolvedValue(['leave:submit']),
       filterTools: jest.fn().mockImplementation((tools) => tools),
+    };
+    mockCredentialManager = {
+      getValidAuthHeaders: jest.fn().mockResolvedValue({ Authorization: 'Bearer test-key' }),
     };
     mockLLMConfig = {
       resolve: jest.fn().mockResolvedValue({
@@ -99,10 +101,10 @@ describe('AgentService', () => {
       providers: [
         AgentService,
         { provide: DB, useValue: mockDb },
-        { provide: CryptoService, useValue: mockCrypto },
         { provide: ConnectorRegistry, useValue: mockRegistry },
         { provide: PermissionService, useValue: mockPermission },
         { provide: AuditService, useValue: mockAudit },
+        { provide: CredentialManager, useValue: mockCredentialManager },
         { provide: LLMConfigService, useValue: mockLLMConfig },
         { provide: PromptBuilderService, useValue: new PromptBuilderService() },
         { provide: ContextManagerService, useValue: new ContextManagerService() },
@@ -205,11 +207,10 @@ describe('AgentService', () => {
       expect(result.toolName).toBe('submit_leave');
       expect(result.riskLevel).toBe('write');
       expect(result.confirmationId).toBeDefined();
-      // Confirmation should be registered in the manager
       expect(confirmationManager.has(result.confirmationId!)).toBe(true);
     });
 
-    it('should execute read-risk tools directly without confirmation', async () => {
+    it('should execute read-risk tools directly using CredentialManager', async () => {
       const toolDef = {
         id: 'td-2',
         name: 'list_orders',
@@ -232,13 +233,6 @@ describe('AgentService', () => {
       };
       mockRegistry.get = jest.fn().mockReturnValue(mockConnector);
 
-      // Mock DB for executeToolCall binding lookup
-      const bindingSelectChain = {
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockResolvedValue([{ encryptedCred: Buffer.from('enc') }]),
-        }),
-      };
-
       (generateText as jest.Mock).mockResolvedValue({
         text: 'Here are the orders.',
         steps: [{
@@ -249,30 +243,7 @@ describe('AgentService', () => {
         }],
       });
 
-      const historyChain = {
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockReturnValue({
-            orderBy: jest.fn().mockResolvedValue([]),
-          }),
-        }),
-      };
-      const connectorChain = {
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockResolvedValue([{ name: 'Demo ERP' }]),
-        }),
-      };
-      const bindingInfoChain = {
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockResolvedValue([{ saasUsername: 'TestUser' }]),
-        }),
-      };
-
-      mockDb.select = jest.fn()
-        .mockReturnValueOnce(historyChain)
-        .mockReturnValueOnce(connectorChain)
-        .mockReturnValueOnce(bindingInfoChain)
-        .mockReturnValueOnce(bindingSelectChain); // for executeToolCall
-      mockDb.insert = jest.fn().mockReturnValue({ values: jest.fn().mockResolvedValue(undefined) });
+      setupDbMocks();
 
       const result = await service.processMessage({
         userId: 'user-1',
@@ -281,9 +252,9 @@ describe('AgentService', () => {
         connectorId: 'conn-1',
       });
 
-      expect(mockConnector.executeToolCall).toHaveBeenCalledWith('list_orders', { status: 'open' }, 'cred');
+      expect(mockCredentialManager.getValidAuthHeaders).toHaveBeenCalledWith('user-1', 'conn-1');
+      expect(mockConnector.executeToolCall).toHaveBeenCalledWith('list_orders', { status: 'open' }, { Authorization: 'Bearer test-key' });
       expect(mockAudit.log).toHaveBeenCalled();
-      // After tool execution, continues to process and returns text
       expect(result.type).toBe('text');
     });
 
@@ -348,7 +319,7 @@ describe('AgentService', () => {
       expect(confirmationManager.has(id)).toBe(false);
     });
 
-    it('should execute tool on confirm action', async () => {
+    it('should execute tool on confirm action using CredentialManager', async () => {
       const id = confirmationManager.createId();
       confirmationManager.register(id, 'user-1');
 
@@ -368,11 +339,6 @@ describe('AgentService', () => {
       };
       mockRegistry.get = jest.fn().mockReturnValue(mockConnector);
 
-      mockDb.select = jest.fn().mockReturnValue({
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockResolvedValue([{ encryptedCred: Buffer.from('enc') }]),
-        }),
-      });
       mockDb.insert = jest.fn().mockReturnValue({ values: jest.fn().mockResolvedValue(undefined) });
 
       const result = await service.handleConfirmation(id, 'confirm', {
@@ -383,7 +349,8 @@ describe('AgentService', () => {
         toolArguments: { type: 'annual', start: '2026-06-01' },
       });
 
-      expect(mockConnector.executeToolCall).toHaveBeenCalledWith('submit_leave', { type: 'annual', start: '2026-06-01' }, 'cred');
+      expect(mockCredentialManager.getValidAuthHeaders).toHaveBeenCalledWith('user-1', 'conn-1');
+      expect(mockConnector.executeToolCall).toHaveBeenCalledWith('submit_leave', { type: 'annual', start: '2026-06-01' }, { Authorization: 'Bearer test-key' });
       expect(result.type).toBe('text');
       expect(result.content).toContain('执行成功');
     });

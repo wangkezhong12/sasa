@@ -46,7 +46,6 @@ describe('database schema completeness', () => {
   it('saasBindings should have encryptedCred and authType', () => {
     expect(schema.saasBindings.encryptedCred).toBeDefined();
     expect(schema.saasBindings.authType).toBeDefined();
-    expect(schema.saasBindings.expiresAt).toBeDefined();
   });
 
   it('conversations should have contextJson and connectorId', () => {

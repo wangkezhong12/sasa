@@ -31,20 +31,18 @@ describe('DemoConnector', () => {
     expect(tool.riskLevel).toBe('read');
   });
 
-  it('should validate demo credentials', async () => {
-    expect(await connector.validateCredentials('demo-key')).toBe(true);
-    expect(await connector.validateCredentials('invalid')).toBe(false);
+  it('should return auth strategy config for api_key', () => {
+    const config = connector.getAuthStrategyConfig('api_key');
+    expect(config).toEqual({ type: 'api_key', params: {} });
   });
 
-  it('should fetch permissions', async () => {
-    const perms = await connector.fetchPermissions('demo-key');
-    expect(perms).toContain('leave:submit');
-    expect(perms).toContain('leave:view');
-    expect(perms).toContain('expense:create');
+  it('should return undefined for unsupported auth type', () => {
+    const config = connector.getAuthStrategyConfig('oauth2_code');
+    expect(config).toBeUndefined();
   });
 
   it('should return TOOL_NOT_FOUND for unknown tool', async () => {
-    const result = await connector.executeToolCall('unknown_tool', {}, 'demo-key');
+    const result = await connector.executeToolCall('unknown_tool', {}, { Authorization: 'Bearer demo-key' });
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('TOOL_NOT_FOUND');
   });

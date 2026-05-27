@@ -1,8 +1,10 @@
 import { Test } from '@nestjs/testing';
-import { UnauthorizedException, NotFoundException } from '@nestjs/common';
 import { SaaSBindingService } from './saas-binding.service';
 import { DB } from '../../common/database/database.module';
 import { CryptoService } from '../../common/crypto/crypto.service';
+import { AuthStrategyResolver } from './auth-strategy.resolver';
+import { ConnectorRegistry } from '../connector/connector-registry.service';
+import { ApiKeyStrategy } from '@sasa/connector-sdk';
 
 describe('SaaSBindingService', () => {
   let service: SaaSBindingService;
@@ -15,6 +17,12 @@ describe('SaaSBindingService', () => {
     mockDb = {
       insert: jest.fn().mockReturnValue({
         values: jest.fn().mockReturnValue({
+          onConflictDoUpdate: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([{
+              id: 'binding-1', userId: 'user-1', connectorId: 'conn-1',
+              authType: 'api_key', status: 'active', createdAt: new Date(),
+            }]),
+          }),
           returning: jest.fn().mockResolvedValue([{
             id: 'binding-1', userId: 'user-1', connectorId: 'conn-1',
             authType: 'api_key', status: 'active', createdAt: new Date(),
@@ -31,11 +39,22 @@ describe('SaaSBindingService', () => {
       }),
     };
 
+    const mockStrategyResolver = {
+      resolve: jest.fn().mockReturnValue(new ApiKeyStrategy()),
+    };
+    const mockConnectorRegistry = {
+      get: jest.fn().mockReturnValue({
+        getAuthStrategyConfig: jest.fn().mockReturnValue({ type: 'api_key', params: {} }),
+      }),
+    };
+
     const module = await Test.createTestingModule({
       providers: [
         SaaSBindingService,
         CryptoService,
         { provide: DB, useValue: mockDb },
+        { provide: AuthStrategyResolver, useValue: mockStrategyResolver },
+        { provide: ConnectorRegistry, useValue: mockConnectorRegistry },
       ],
     }).compile();
 
@@ -48,25 +67,44 @@ describe('SaaSBindingService', () => {
   });
 
   describe('bind', () => {
-    it('should encrypt credential before storing', async () => {
+    it('should use strategy to validate and store JSON payload', async () => {
       await service.bind('user-1', {
-        connectorId: 'conn-1', authType: 'api_key', credential: 'sk-test-key',
+        connectorId: 'conn-1', authType: 'api_key', credential: { apiKey: 'sk-test-key' },
       });
       const valuesCall = mockDb.insert().values.mock.calls[0][0];
       expect(valuesCall.encryptedCred).toBeInstanceOf(Buffer);
-      // Verify round-trip
-      expect(cryptoService.decrypt(valuesCall.encryptedCred)).toBe('sk-test-key');
+      // Verify stored JSON payload
+      const decrypted = cryptoService.decrypt(valuesCall.encryptedCred);
+      const payload = JSON.parse(decrypted);
+      expect(payload).toEqual({ type: 'api_key', apiKey: 'sk-test-key' });
     });
 
     it('should store binding with correct fields', async () => {
       const result = await service.bind('user-1', {
-        connectorId: 'conn-1', authType: 'api_key', credential: 'sk-test',
+        connectorId: 'conn-1', authType: 'api_key', credential: { apiKey: 'sk-test' },
         saasUserId: 'saas-user-1', saasUsername: 'testuser',
       });
       const valuesCall = mockDb.insert().values.mock.calls[0][0];
       expect(valuesCall.authType).toBe('api_key');
       expect(valuesCall.saasUserId).toBe('saas-user-1');
       expect(valuesCall.connectorId).toBe('conn-1');
+    });
+
+    it('should not return encryptedCred in result', async () => {
+      const result = await service.bind('user-1', {
+        connectorId: 'conn-1', authType: 'api_key', credential: { apiKey: 'sk-test' },
+      });
+      expect(result.encryptedCred).toBeUndefined();
+    });
+  });
+
+  describe('bindWithPayload', () => {
+    it('should store pre-encrypted payload directly', async () => {
+      const encryptedCred = cryptoService.encrypt(JSON.stringify({ type: 'oauth2_code', accessToken: 'at-123' }));
+      await service.bindWithPayload('user-1', 'conn-1', 'oauth2_code', encryptedCred);
+      const valuesCall = mockDb.insert().values.mock.calls[0][0];
+      expect(valuesCall.authType).toBe('oauth2_code');
+      expect(valuesCall.encryptedCred).toBeInstanceOf(Buffer);
     });
   });
 

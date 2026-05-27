@@ -1,10 +1,10 @@
 import { BaseRestConnector } from '@sasa/connector-sdk';
-import type { ConnectorToolDefinition } from '@sasa/shared';
+import type { ConnectorToolDefinition, AuthType, AuthStrategyConfig } from '@sasa/shared';
 
 export class DemoConnector extends BaseRestConnector {
   name = 'Demo ERP';
   version = '1.0.0';
-  supportedAuthTypes = ['api_key'] as ('oauth2' | 'api_key')[];
+  supportedAuthTypes: AuthType[] = ['api_key'];
 
   getBaseUrl() {
     return 'https://demo-erp.example.com/api';
@@ -42,11 +42,10 @@ export class DemoConnector extends BaseRestConnector {
     ];
   }
 
-  async validateCredentials(credentials: string): Promise<boolean> {
-    return credentials.startsWith('demo-');
-  }
-
-  async fetchPermissions(_credentials: string): Promise<string[]> {
-    return ['leave:submit', 'leave:view', 'expense:create'];
+  getAuthStrategyConfig(authType: AuthType): AuthStrategyConfig | undefined {
+    if (authType === 'api_key') {
+      return { type: 'api_key', params: {} };
+    }
+    return undefined;
   }
 }

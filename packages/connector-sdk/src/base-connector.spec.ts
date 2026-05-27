@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BaseRestConnector } from './base-connector';
-import type { ConnectorToolDefinition } from '@sasa/shared';
+import type { ConnectorToolDefinition, AuthType, AuthStrategyConfig } from '@sasa/shared';
 
 class TestConnector extends BaseRestConnector {
   name = 'test-connector';
   version = '1.0.0';
-  supportedAuthTypes = ['api_key'] as const;
+  supportedAuthTypes: AuthType[] = ['api_key'];
   override protocol = 'rest' as const;
 
   getBaseUrl() {
@@ -44,12 +44,11 @@ class TestConnector extends BaseRestConnector {
     ];
   }
 
-  async fetchPermissions() {
-    return ['items:read', 'items:write'];
-  }
-
-  async validateCredentials() {
-    return true;
+  getAuthStrategyConfig(authType: AuthType): AuthStrategyConfig | undefined {
+    if (authType === 'api_key') {
+      return { type: 'api_key', params: {} };
+    }
+    return undefined;
   }
 }
 
@@ -70,30 +69,30 @@ describe('BaseRestConnector', () => {
     expect(tools[0].name).toBe('get_items');
   });
 
-  it('should validate credentials', async () => {
-    const result = await connector.validateCredentials('test-key');
-    expect(result).toBe(true);
+  it('should return auth strategy config for api_key', () => {
+    const config = connector.getAuthStrategyConfig('api_key');
+    expect(config).toEqual({ type: 'api_key', params: {} });
   });
 
-  it('should fetch permissions', async () => {
-    const perms = await connector.fetchPermissions('test-key');
-    expect(perms).toEqual(['items:read', 'items:write']);
+  it('should return undefined for unsupported auth type', () => {
+    const config = connector.getAuthStrategyConfig('oauth2_code');
+    expect(config).toBeUndefined();
   });
 
   it('should return TOOL_NOT_FOUND for unknown tool', async () => {
-    const result = await connector.executeToolCall('unknown_tool', {}, 'test-key');
+    const result = await connector.executeToolCall('unknown_tool', {}, { Authorization: 'Bearer test-key' });
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('TOOL_NOT_FOUND');
   });
 
-  it('should execute GET tool call successfully', async () => {
+  it('should execute GET tool call with auth headers', async () => {
     const mockFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ items: [] }),
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = await connector.executeToolCall('get_items', {}, 'test-key');
+    const result = await connector.executeToolCall('get_items', {}, { Authorization: 'Bearer test-key' });
     expect(result.success).toBe(true);
     expect(result.data).toEqual({ items: [] });
     expect(mockFetch).toHaveBeenCalledWith(
@@ -116,7 +115,7 @@ describe('BaseRestConnector', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = await connector.executeToolCall('get_item_by_id', { id: '123' }, 'test-key');
+    const result = await connector.executeToolCall('get_item_by_id', { id: '123' }, { Authorization: 'Bearer test-key' });
     expect(result.success).toBe(true);
     expect(mockFetch).toHaveBeenCalledWith(
       'https://api.example.com/items/123',
@@ -133,7 +132,7 @@ describe('BaseRestConnector', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = await connector.executeToolCall('create_item', { itemName: 'Widget' }, 'test-key');
+    const result = await connector.executeToolCall('create_item', { itemName: 'Widget' }, { Authorization: 'Bearer test-key' });
     expect(result.success).toBe(true);
     expect(mockFetch).toHaveBeenCalledWith(
       'https://api.example.com/items',
@@ -154,7 +153,7 @@ describe('BaseRestConnector', () => {
     });
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = await connector.executeToolCall('get_items', {}, 'test-key');
+    const result = await connector.executeToolCall('get_items', {}, { Authorization: 'Bearer test-key' });
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('400');
     expect(result.error?.message).toBe('Bad Request');
@@ -166,7 +165,7 @@ describe('BaseRestConnector', () => {
     const mockFetch = vi.fn().mockRejectedValue(new Error('Connection refused'));
     vi.stubGlobal('fetch', mockFetch);
 
-    const result = await connector.executeToolCall('get_items', {}, 'test-key');
+    const result = await connector.executeToolCall('get_items', {}, { Authorization: 'Bearer test-key' });
     expect(result.success).toBe(false);
     expect(result.error?.code).toBe('NETWORK_ERROR');
     expect(result.error?.message).toBe('Connection refused');
