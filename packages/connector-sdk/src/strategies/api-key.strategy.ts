@@ -22,6 +22,7 @@ export class ApiKeyStrategy implements AuthStrategy {
   }
 
   buildAuthHeaders(creds: CredentialPayload): Record<string, string> {
+    if (creds.type !== 'api_key') return {};
     return { Authorization: `Bearer ${creds.apiKey}` };
   }
 }

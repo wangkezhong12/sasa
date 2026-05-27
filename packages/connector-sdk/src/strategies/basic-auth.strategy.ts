@@ -41,7 +41,7 @@ export class BasicAuthStrategy implements AuthStrategy {
     }
 
     // Basic mode: return Authorization: Basic base64(user:pass)
-    const encoded = Buffer.from(`${creds.username}:${creds.password}`).toString('base64');
+    const encoded = btoa(`${creds.username}:${creds.password}`);
     return { Authorization: `Basic ${encoded}` };
   }
 
