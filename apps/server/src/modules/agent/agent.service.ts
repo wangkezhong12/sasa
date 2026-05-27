@@ -9,6 +9,7 @@ import { ConnectorRegistry } from '../connector/connector-registry.service';
 import { CryptoService } from '../../common/crypto/crypto.service';
 import { PermissionService } from '../permission/permission.service';
 import { AuditService } from '../permission/audit.service';
+import { CredentialManager } from '../auth/credential-manager.service';
 import { LLMConfigService, ResolvedLLMConfig } from './llm-config.service';
 import { PromptBuilderService } from './prompt-builder.service';
 import { ContextManagerService } from './context-manager.service';
@@ -47,6 +48,7 @@ export class AgentService {
     private auditService: AuditService,
     private connectorRegistry: ConnectorRegistry,
     private crypto: CryptoService,
+    private credentialManager: CredentialManager,
   ) {}
 
   async processMessage(params: ProcessMessageParams): Promise<AgentResponse> {
@@ -210,16 +212,8 @@ export class AgentService {
   ): Promise<AgentResponse> {
     try {
       const connector = this.connectorRegistry.get(connectorId);
-      const [binding] = await this.db.select({ encryptedCred: saasBindings.encryptedCred })
-        .from(saasBindings)
-        .where(and(eq(saasBindings.userId, userId), eq(saasBindings.connectorId, connectorId)));
-
-      if (!binding) {
-        return { type: 'error', error: 'No SaaS binding found for this connector' };
-      }
-
-      const cred = this.crypto.decrypt(binding.encryptedCred);
-      const toolResult = await connector.executeToolCall(toolName, args, cred);
+      const authHeaders = await this.credentialManager.getValidAuthHeaders(userId, connectorId);
+      const toolResult = await connector.executeToolCall(toolName, args, authHeaders);
 
       // Audit log — redact known sensitive parameter names
       await this.auditService.log({

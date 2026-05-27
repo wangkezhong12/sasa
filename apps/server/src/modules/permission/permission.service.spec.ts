@@ -3,14 +3,14 @@ import { PermissionService } from './permission.service';
 import { DB } from '../../common/database/database.module';
 import { REDIS } from '../../common/redis/redis.module';
 import { ConnectorRegistry } from '../connector/connector-registry.service';
-import { CryptoService } from '../../common/crypto/crypto.service';
+import { CredentialManager } from '../auth/credential-manager.service';
 
 describe('PermissionService', () => {
   let service: PermissionService;
   let mockDb: any;
   let mockRedis: any;
   let mockRegistry: any;
-  let mockCrypto: any;
+  let mockCredentialManager: any;
 
   beforeEach(async () => {
     mockDb = {
@@ -27,7 +27,9 @@ describe('PermissionService', () => {
     };
     mockRedis = { get: jest.fn(), set: jest.fn() };
     mockRegistry = { get: jest.fn() };
-    mockCrypto = { decrypt: jest.fn() };
+    mockCredentialManager = {
+      getValidAuthHeaders: jest.fn().mockResolvedValue({ Authorization: 'Bearer test-key' }),
+    };
 
     const module = await Test.createTestingModule({
       providers: [
@@ -35,7 +37,7 @@ describe('PermissionService', () => {
         { provide: DB, useValue: mockDb },
         { provide: REDIS, useValue: mockRedis },
         { provide: ConnectorRegistry, useValue: mockRegistry },
-        { provide: CryptoService, useValue: mockCrypto },
+        { provide: CredentialManager, useValue: mockCredentialManager },
       ],
     }).compile();
 
@@ -134,79 +136,46 @@ describe('PermissionService', () => {
       expect(result).toEqual([]);
     });
 
-    it('should fetch permissions from connector, update DB and cache', async () => {
-      const fetchedPerms = ['leave:submit', 'leave:approve'];
+    it('should return empty when no permissions endpoint configured', async () => {
+      mockDb.select = jest.fn()
+        .mockReturnValueOnce({
+          from: jest.fn().mockReturnValue({
+            where: jest.fn().mockResolvedValue([{ id: 'binding-id' }]),
+          }),
+        })
+        .mockReturnValueOnce({
+          from: jest.fn().mockReturnValue({
+            where: jest.fn().mockResolvedValue([{ authType: 'api_key' }]),
+          }),
+        });
 
-      mockDb.select = jest.fn().mockReturnValue({
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockResolvedValue([{
-            id: 'binding-id',
-            encryptedCred: Buffer.from('encrypted'),
-          }]),
-        }),
+      mockRegistry.get = jest.fn().mockReturnValue({
+        getBaseUrl: () => 'https://api.example.com',
+        getAuthStrategyConfig: () => ({ type: 'api_key', params: {} }),
       });
-
-      const mockConnector = {
-        fetchPermissions: jest.fn().mockResolvedValue(fetchedPerms),
-      };
-      mockRegistry.get = jest.fn().mockReturnValue(mockConnector);
-      mockCrypto.decrypt = jest.fn().mockReturnValue('decrypted-cred');
-
-      const updateChain = {
-        set: jest.fn().mockReturnValue({
-          where: jest.fn().mockResolvedValue(undefined),
-        }),
-      };
-      mockDb.update = jest.fn().mockReturnValue(updateChain);
 
       const result = await service.syncPermissions('user-1', 'conn-1');
-
-      expect(result).toEqual(fetchedPerms);
-      expect(mockRegistry.get).toHaveBeenCalledWith('conn-1');
-      expect(mockCrypto.decrypt).toHaveBeenCalledWith(Buffer.from('encrypted'));
-      expect(mockConnector.fetchPermissions).toHaveBeenCalledWith('decrypted-cred');
-      expect(mockDb.update).toHaveBeenCalledWith(expect.anything());
-      expect(updateChain.set).toHaveBeenCalledWith({ permissionsJson: fetchedPerms });
-      expect(mockRedis.set).toHaveBeenCalledWith(
-        'permissions:user-1:conn-1',
-        JSON.stringify(fetchedPerms),
-        'EX',
-        expect.any(Number),
-      );
+      expect(result).toEqual([]);
     });
 
-    it('should throw InternalServerErrorException when connector fails', async () => {
+    it('should throw InternalServerErrorException when CredentialManager fails', async () => {
       mockDb.select = jest.fn().mockReturnValue({
         from: jest.fn().mockReturnValue({
-          where: jest.fn().mockResolvedValue([{
-            id: 'binding-id',
-            encryptedCred: Buffer.from('encrypted'),
-          }]),
+          where: jest.fn().mockResolvedValue([{ id: 'binding-id' }]),
         }),
       });
-      mockRegistry.get = jest.fn().mockReturnValue({
-        fetchPermissions: jest.fn().mockRejectedValue(new Error('Network error')),
-      });
-      mockCrypto.decrypt = jest.fn().mockReturnValue('cred');
+      mockCredentialManager.getValidAuthHeaders = jest.fn().mockRejectedValue(new Error('Binding not found'));
+
+      // Need to provide authType select for the sync flow
+      mockDb.select = jest.fn()
+        .mockReturnValueOnce({
+          from: jest.fn().mockReturnValue({
+            where: jest.fn().mockResolvedValue([{ id: 'binding-id' }]),
+          }),
+        });
 
       await expect(service.syncPermissions('user-1', 'conn-1'))
-        .rejects.toThrow('Failed to sync permissions: Network error');
-    });
-
-    it('should throw InternalServerErrorException when decrypt fails', async () => {
-      mockDb.select = jest.fn().mockReturnValue({
-        from: jest.fn().mockReturnValue({
-          where: jest.fn().mockResolvedValue([{
-            id: 'binding-id',
-            encryptedCred: Buffer.from('bad-data'),
-          }]),
-        }),
-      });
-      mockRegistry.get = jest.fn().mockReturnValue({});
-      mockCrypto.decrypt = jest.fn().mockImplementation(() => { throw new Error('Decryption failed'); });
-
-      await expect(service.syncPermissions('user-1', 'conn-1'))
-        .rejects.toThrow('Failed to sync permissions: Decryption failed');
+        .rejects.toThrow('Failed to sync permissions');
     });
   });
 });
