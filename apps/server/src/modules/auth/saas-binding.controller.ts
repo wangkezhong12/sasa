@@ -10,7 +10,13 @@ export class SaaSBindingController {
 
   @Post()
   bind(@Request() req: any, @Body() dto: BindSaasDto) {
-    return this.bindingService.bind(req.user.id, dto);
+    return this.bindingService.bind(req.user.id, {
+      connectorId: dto.connectorId,
+      authType: dto.authType,
+      credential: dto.toCredentialInput(),
+      saasUserId: dto.saasUserId,
+      saasUsername: dto.saasUsername,
+    });
   }
 
   @Get()
