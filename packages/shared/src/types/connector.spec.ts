@@ -8,10 +8,9 @@ describe('connector types', () => {
       version: '1.0',
       protocol: 'rest',
       supportedAuthTypes: ['api_key'],
-      validateCredentials: async () => true,
+      getAuthStrategyConfig: () => ({ type: 'api_key', params: {} }),
       getToolDefinitions: () => [],
-      fetchPermissions: async () => [],
-      executeToolCall: async () => ({ success: true }),
+      executeToolCall: async (_toolName, _params, authHeaders) => ({ success: true }),
     };
     expect(connector.name).toBe('test');
     expect(connector.protocol).toBe('rest');

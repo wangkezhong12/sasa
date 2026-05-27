@@ -1,7 +1,6 @@
 import { Test } from '@nestjs/testing';
 import { AgentService } from './agent.service';
 import { DB } from '../../common/database/database.module';
-import { CryptoService } from '../../common/crypto/crypto.service';
 import { ConnectorRegistry } from '../connector/connector-registry.service';
 import { PermissionService } from '../permission/permission.service';
 import { AuditService } from '../permission/audit.service';
@@ -29,7 +28,6 @@ describe('AgentService', () => {
   let service: AgentService;
   let confirmationManager: ConfirmationManager;
   let mockDb: any;
-  let mockCrypto: any;
   let mockRegistry: any;
   let mockPermission: any;
   let mockAudit: any;
@@ -75,7 +73,6 @@ describe('AgentService', () => {
         values: jest.fn().mockResolvedValue(undefined),
       }),
     };
-    mockCrypto = { decrypt: jest.fn().mockReturnValue('cred') };
     mockRegistry = { get: jest.fn() };
     mockAudit = { log: jest.fn().mockResolvedValue(undefined) };
     mockPermission = {
@@ -104,7 +101,6 @@ describe('AgentService', () => {
       providers: [
         AgentService,
         { provide: DB, useValue: mockDb },
-        { provide: CryptoService, useValue: mockCrypto },
         { provide: ConnectorRegistry, useValue: mockRegistry },
         { provide: PermissionService, useValue: mockPermission },
         { provide: AuditService, useValue: mockAudit },

@@ -6,7 +6,6 @@ import { createAnthropic } from '@ai-sdk/anthropic';
 import { DB } from '../../common/database/database.module';
 import { messages, saasConnectors, saasBindings } from '../../common/database/schema';
 import { ConnectorRegistry } from '../connector/connector-registry.service';
-import { CryptoService } from '../../common/crypto/crypto.service';
 import { PermissionService } from '../permission/permission.service';
 import { AuditService } from '../permission/audit.service';
 import { CredentialManager } from '../auth/credential-manager.service';
@@ -47,7 +46,6 @@ export class AgentService {
     private permissionService: PermissionService,
     private auditService: AuditService,
     private connectorRegistry: ConnectorRegistry,
-    private crypto: CryptoService,
     private credentialManager: CredentialManager,
   ) {}
 
