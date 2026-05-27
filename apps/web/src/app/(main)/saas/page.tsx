@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { SaasCard } from '@/components/saas/saas-card';
 import { AuthBindingForm, type AuthStrategySchema } from '@/components/saas/auth-binding-form';
@@ -22,7 +22,7 @@ interface Connector {
   status: string;
 }
 
-export default function SaasPage() {
+function SaasPageContent() {
   const searchParams = useSearchParams();
   const [connectors, setConnectors] = useState<Connector[]>([]);
   const [bindings, setBindings] = useState<Binding[]>([]);
@@ -171,5 +171,13 @@ export default function SaasPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function SaasPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-full"><p>加载中...</p></div>}>
+      <SaasPageContent />
+    </Suspense>
   );
 }

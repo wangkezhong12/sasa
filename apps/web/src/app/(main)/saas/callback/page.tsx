@@ -1,11 +1,12 @@
 'use client';
 
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
-export default function SaasCallbackPage() {
+function CallbackContent() {
   const searchParams = useSearchParams();
   const error = searchParams.get('error');
 
@@ -39,5 +40,13 @@ export default function SaasCallbackPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function SaasCallbackPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center min-h-screen"><p>加载中...</p></div>}>
+      <CallbackContent />
+    </Suspense>
   );
 }
